@@ -8,6 +8,10 @@ from lsst.ts.ataos import ataos_csc
 
 import SALPY_ATAOS
 
+import SALPY_ATMCS
+import SALPY_ATPneumatics
+import SALPY_ATHexapod
+
 np.random.seed(47)
 
 index_gen = salobj.index_generator()
@@ -17,10 +21,26 @@ class Harness:
     def __init__(self):
         salobj.test_utils.set_random_lsst_dds_domain()
         self.csc = ataos_csc.ATAOS()
-        self.remote = salobj.Remote(SALPY_ATAOS)
+
+        # Adds a remote to control the ATAOS CSC
+        self.aos_remote = salobj.Remote(SALPY_ATAOS)
+
+        # Adds Controllers to receive commands from the ATAOS system
+        self.atmcs = salobj.Controller(SALPY_ATMCS)
+        self.pnematics = salobj.Controller(SALPY_ATPneumatics)
+        self.hexapod = salobj.Controller(SALPY_ATHexapod)
+
+    async def enable_csc(self):
+        """Utility method to enable the Harness csc."""
+
+        commands = ("start", "enable")
+
+        for cmd in commands:
+            cmd_attr = getattr(self.aos_remote, f"cmd_{cmd}")
+            await cmd_attr.start(cmd_attr.DataType(), timeout=5*salobj.base_csc.HEARTBEAT_INTERVAL)
 
 
-class TestDIMMCSC(unittest.TestCase):
+class TestCSC(unittest.TestCase):
 
     def test_standard_state_transitions(self):
         """Test standard CSC state transitions.
@@ -50,13 +70,13 @@ class TestDIMMCSC(unittest.TestCase):
             harness = Harness()
 
             # Check initial state
-            current_state = await harness.remote.evt_summaryState.next(flush=False, timeout=1.)
+            current_state = await harness.aos_remote.evt_summaryState.next(flush=False, timeout=1.)
 
             self.assertEqual(harness.csc.summary_state, salobj.State.STANDBY)
             self.assertEqual(current_state.summaryState, salobj.State.STANDBY)
 
             # Check that settingVersions was published and matches expected values
-            setting_versions = await harness.remote.evt_settingVersions.next(flush=False, timeout=1.)
+            setting_versions = await harness.aos_remote.evt_settingVersions.next(flush=False, timeout=1.)
             self.assertEqual(setting_versions.recommendedSettingsVersion,
                              harness.csc.model.recommended_settings)
             self.assertEqual(setting_versions.recommendedSettingsLabels,
@@ -70,24 +90,24 @@ class TestDIMMCSC(unittest.TestCase):
                 if bad_command in ("start", "exitControl"):
                     continue  # valid command in STANDBY state
                 with self.subTest(bad_command=bad_command):
-                    cmd_attr = getattr(harness.remote, f"cmd_{bad_command}")
+                    cmd_attr = getattr(harness.aos_remote, f"cmd_{bad_command}")
                     with self.assertRaises(salobj.AckError):
                         id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=1.)
 
             for bad_command in extra_commands:
                 with self.subTest(bad_command=bad_command):
-                    cmd_attr = getattr(harness.remote, f"cmd_{bad_command}")
+                    cmd_attr = getattr(harness.aos_remote, f"cmd_{bad_command}")
                     with self.assertRaises(salobj.AckError):
                         id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=1.)
 
             # send start; new state is DISABLED
-            cmd_attr = getattr(harness.remote, f"cmd_start")
-            state_coro = harness.remote.evt_summaryState.next(timeout=1.)
+            cmd_attr = getattr(harness.aos_remote, f"cmd_start")
+            state_coro = harness.aos_remote.evt_summaryState.next(flush=True, timeout=1.)
             start_topic = cmd_attr.DataType()
             start_topic.settingsToApply = 'test'  # test settings.
             id_ack = await cmd_attr.start(start_topic, timeout=120)  # this one can take longer to execute
             state = await state_coro
-            self.assertEqual(id_ack.ack.ack, harness.remote.salinfo.lib.SAL__CMD_COMPLETE)
+            self.assertEqual(id_ack.ack.ack, harness.aos_remote.salinfo.lib.SAL__CMD_COMPLETE)
             self.assertEqual(id_ack.ack.error, 0)
             self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
             self.assertEqual(state.summaryState, salobj.State.DISABLED)
@@ -99,22 +119,22 @@ class TestDIMMCSC(unittest.TestCase):
                 if bad_command in ("enable", "standby"):
                     continue  # valid command in DISABLED state
                 with self.subTest(bad_command=bad_command):
-                    cmd_attr = getattr(harness.remote, f"cmd_{bad_command}")
+                    cmd_attr = getattr(harness.aos_remote, f"cmd_{bad_command}")
                     with self.assertRaises(salobj.AckError):
                         id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=1.)
 
             for bad_command in extra_commands:
                 with self.subTest(bad_command=bad_command):
-                    cmd_attr = getattr(harness.remote, f"cmd_{bad_command}")
+                    cmd_attr = getattr(harness.aos_remote, f"cmd_{bad_command}")
                     with self.assertRaises(salobj.AckError):
                         id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=1.)
 
             # send enable; new state is ENABLED
-            cmd_attr = getattr(harness.remote, f"cmd_enable")
-            state_coro = harness.remote.evt_summaryState.next(timeout=1.)
+            cmd_attr = getattr(harness.aos_remote, f"cmd_enable")
+            state_coro = harness.aos_remote.evt_summaryState.next(flush=True, timeout=1.)
             id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=1.)
             state = await state_coro
-            self.assertEqual(id_ack.ack.ack, harness.remote.salinfo.lib.SAL__CMD_COMPLETE)
+            self.assertEqual(id_ack.ack.ack, harness.aos_remote.salinfo.lib.SAL__CMD_COMPLETE)
             self.assertEqual(id_ack.ack.error, 0)
             self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
             self.assertEqual(state.summaryState, salobj.State.ENABLED)
@@ -123,28 +143,179 @@ class TestDIMMCSC(unittest.TestCase):
                 if bad_command == "disable":
                     continue  # valid command in ENABLE state
                 with self.subTest(bad_command=bad_command):
-                    cmd_attr = getattr(harness.remote, f"cmd_{bad_command}")
+                    cmd_attr = getattr(harness.aos_remote, f"cmd_{bad_command}")
                     with self.assertRaises(salobj.AckError):
                         id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=1.)
 
-            # Now, check that the commands works
-            for good_command in extra_commands:
-                with self.subTest(bad_command=good_command):
-                    cmd_attr = getattr(harness.remote, f"cmd_{good_command}")
-                    try:
-                        id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=1.)
-                    except salobj.AckError:
-                        self.assertTrue(False, f"Command {good_command} failed")
-
+            # Todo: Test that other commands works.
             # send disable; new state is DISABLED
-            cmd_attr = getattr(harness.remote, f"cmd_disable")
+            cmd_attr = getattr(harness.aos_remote, f"cmd_disable")
             # this CMD may take some time to complete
             id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=30.)
-            self.assertEqual(id_ack.ack.ack, harness.remote.salinfo.lib.SAL__CMD_COMPLETE)
+            self.assertEqual(id_ack.ack.ack, harness.aos_remote.salinfo.lib.SAL__CMD_COMPLETE)
             self.assertEqual(id_ack.ack.error, 0)
             self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
 
         asyncio.get_event_loop().run_until_complete(doit())
+
+    def test_applyCorrection(self):
+        """Test applyCorrection command. """
+
+        async def doit():
+            harness = Harness()
+            timeout = 5 * salobj.base_csc.HEARTBEAT_INTERVAL
+            # Enable the CSC
+            await harness.enable_csc()
+            self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
+
+            # Check that applyCorrection fails if enable Correction is on
+            cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
+
+            send_topic = cmd_attr.DataType()
+            send_topic.m1 = True
+
+            await cmd_attr.start(send_topic,
+                                 timeout=timeout)
+
+            cmd_attr = getattr(harness.aos_remote, f"cmd_applyCorrection")
+            with self.assertRaises(salobj.AckError):
+                await cmd_attr.start(cmd_attr.DataType(),
+                                     timeout=timeout)
+
+    def test_applyFocusOffset(self):
+        """Test applyFocusOffset command."""
+        pass
+
+    def test_enable_disable_corrections(self):
+        """Test enableCorrection"""
+
+        async def doit():
+            harness = Harness()
+
+            # Enable the CSC
+            await harness.enable_csc()
+            self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
+
+            cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
+            # id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=5*salobj.base_csc.HEARTBEAT_INTERVAL)
+
+            timeout = 5 * salobj.base_csc.HEARTBEAT_INTERVAL
+
+            # Try to send empty enable correction, this will fail.
+            with self.assertRaises(salobj.AckError):
+                await cmd_attr.start(cmd_attr.DataType(),
+                                     timeout=timeout)
+
+            # Enable corrections one by one
+            corrections = ("m1", "m2", "hexapod", "focus", "moveWhileExposing")
+            expected_corrections = {"m1": False, "m2": False, "hexapod": False, "focus": False,
+                                    "moveWhileExposing": False}
+
+            for corr in corrections:
+                send_topic = cmd_attr.DataType()
+                expected_corrections[corr] = True
+                # Note: Setting only the correction I want to enable. Any correction already
+                # enabled will be left unchanged. This is part of the test.
+                setattr(send_topic, corr, True)
+
+                coro = getattr(harness.aos_remote,
+                               f"evt_correctionEnabled").next(flush=False,
+                                                              timeout=timeout)
+                await cmd_attr.start(send_topic,
+                                     timeout=timeout)
+                receive_topic = await coro
+                for test_corr in corrections:
+                    with self.subTest(test_corr=test_corr):
+                        self.assertEqual(getattr(receive_topic, test_corr),
+                                         expected_corrections[test_corr],
+                                         "Failed to set correction for %s. "
+                                         "Expected %s, got %s" % (test_corr,
+                                                                  expected_corrections[test_corr],
+                                                                  getattr(receive_topic, test_corr)))
+
+            cmd_attr = getattr(harness.aos_remote, f"cmd_disableCorrection")
+
+            # Try to send empty disable correction, this will fail.
+            with self.assertRaises(salobj.AckError):
+                await cmd_attr.start(cmd_attr.DataType(),
+                                     timeout=timeout)
+
+            # Disable corrections one by one
+            for corr in corrections:
+                send_topic = cmd_attr.DataType()
+                expected_corrections[corr] = False  # mark as expected to False
+                # Note: Setting only the correction I want to disable. Any correction
+                # already disable will be left unchanged. This is part of the test.
+                # True means I want to disable
+                setattr(send_topic, corr, True)
+
+                coro = getattr(harness.aos_remote,
+                               f"evt_correctionEnabled").next(flush=False,
+                                                              timeout=timeout)
+                await cmd_attr.start(send_topic,
+                                     timeout=timeout)
+                receive_topic = await coro
+                for test_corr in corrections:
+                    with self.subTest(test_corr=test_corr):
+                        self.assertEqual(getattr(receive_topic, test_corr),
+                                         expected_corrections[test_corr],
+                                         "Failed to set correction for %s. "
+                                         "Expected %s, got %s" % (test_corr,
+                                                                  expected_corrections[test_corr],
+                                                                  getattr(receive_topic, test_corr)))
+
+            # everything is disable, send enable all.
+            cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
+            send_topic = cmd_attr.DataType()
+            send_topic.all = True
+
+            coro = getattr(harness.aos_remote,
+                           f"evt_correctionEnabled").next(flush=False,
+                                                          timeout=timeout)
+            await cmd_attr.start(send_topic,
+                                 timeout=timeout)
+            receive_topic = await coro
+
+            # They should all be true, except moveWhileExposing
+            for test_corr in corrections:
+                with self.subTest(test_corr=test_corr):
+                    if test_corr == 'moveWhileExposing':
+                        self.assertFalse(getattr(receive_topic, test_corr),
+                                         "Failed to set correction for moveWhileExposing. "
+                                         "Expected True, got %s" % getattr(receive_topic, test_corr))
+                    else:
+                        self.assertTrue(getattr(receive_topic, test_corr),
+                                        "Failed to set correction for %s. "
+                                        "Expected %s, got %s" % (test_corr,
+                                                                 "True",
+                                                                 getattr(receive_topic, test_corr)))
+
+            # everything is enable, send disable all
+            cmd_attr = getattr(harness.aos_remote, f"cmd_disableCorrection")
+            send_topic = cmd_attr.DataType()
+            send_topic.all = True
+
+            coro = getattr(harness.aos_remote,
+                           f"evt_correctionEnabled").next(flush=False,
+                                                          timeout=timeout)
+            await cmd_attr.start(send_topic,
+                                 timeout=timeout)
+            receive_topic = await coro
+
+            # They should all be False
+            for test_corr in corrections:
+                with self.subTest(test_corr=test_corr):
+                    self.assertFalse(getattr(receive_topic, test_corr),
+                                     "Failed to set correction for %s. "
+                                     "Expected %s, got %s" % (test_corr,
+                                                              "False",
+                                                              getattr(receive_topic, test_corr)))
+
+        asyncio.get_event_loop().run_until_complete(doit())
+
+    def test_setFocus(self):
+        """Test setFocus"""
+        pass
 
 
 if __name__ == '__main__':

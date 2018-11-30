@@ -26,3 +26,16 @@ class Model:
 
         """
         return 'default,option1,test'  # FIXME: Read from config file
+
+    async def get_corrections(self, azimuth, elevation):
+        """
+
+        Parameters
+        ----------
+        azimuth
+        elevation
+
+        Returns
+        -------
+
+        """
