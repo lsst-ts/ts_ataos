@@ -27,7 +27,7 @@ class Model:
         """
         return 'default,option1,test'  # FIXME: Read from config file
 
-    async def get_corrections(self, azimuth, elevation):
+    def get_correction_m1(self, azimuth, elevation):
         """
 
         Parameters
@@ -37,5 +37,47 @@ class Model:
 
         Returns
         -------
-
+        pressure : float
+            Pressure to apply (Pascal).
         """
+        return 0.
+
+    def get_correction_m2(self, azimuth, elevation):
+        """
+
+        Parameters
+        ----------
+        azimuth
+        elevation
+
+        Returns
+        -------
+        pressure : float
+            Pressure to apply (Pascal).
+        """
+        return 0.
+
+    def get_correction_hexapod(self, azimuth, elevation):
+        """
+
+        Parameters
+        ----------
+        azimuth
+        elevation
+
+        Returns
+        -------
+        x : float
+            x-axis position (um)
+        y : float
+            y-axis position (um)
+        z : float
+            z-axis position (um)
+        u : float
+            rotation angle with respect to x-axis (degrees)
+        v : float
+            rotation angle with respect to y-axis (degrees)
+        w : float
+            rotation angle with respect to z-axis (degrees)
+        """
+        return 0., 0., 0., 0., 0., 0.

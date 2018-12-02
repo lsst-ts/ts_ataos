@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import Mock
 import asyncio
 import numpy as np
 
@@ -181,6 +182,79 @@ class TestCSC(unittest.TestCase):
             with self.assertRaises(salobj.AckError):
                 await cmd_attr.start(cmd_attr.DataType(),
                                      timeout=timeout)
+
+            # Switch corrections off
+            cmd_attr = getattr(harness.aos_remote, f"cmd_disableCorrection")
+            send_topic = cmd_attr.DataType()
+            send_topic.all = True
+
+            await cmd_attr.start(send_topic,
+                                 timeout=timeout)
+
+            # Check that applyCorrection works for current telescope position
+            def callback(data):
+                pass
+
+            # Add callback to commands from pneumatics and hexapod
+            harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
+
+            # FIXME: Check if this is correct! Is there a difference in command to move hexapod and focus
+            # or they will use the same command?
+            harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=callback)
+
+            # Add callback to events
+            harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
+
+            harness.aos_remote.evt_m1CorrectionStarted.callback = Mock(wraps=callback)
+            harness.aos_remote.evt_m2CorrectionStarted.callback = Mock(wraps=callback)
+            harness.aos_remote.evt_hexapodCorrectionStarted.callback = Mock(wraps=callback)
+
+            harness.aos_remote.evt_m1CorrectionCompleted.callback = Mock(wraps=callback)
+            harness.aos_remote.evt_m2CorrectionCompleted.callback = Mock(wraps=callback)
+            harness.aos_remote.evt_hexapodCorrectionCompleted.callback = Mock(wraps=callback)
+
+            # Publish telescope position using atmcs controller from harness
+            azimuth = 0.  # Test azimuth = 0.
+            # make sure it is never zero because np.random.uniform is [min, max)
+            elevation = 90.-np.random.uniform(0., 90.)
+
+            async def publish_mountEnconders(az, el, ntimes=5):
+                topic = harness.atmcs.tel_mountEncoders.DataType()
+                topic.azimuthCalculatedAngle = az
+                topic.elevationCalculatedAngle = el
+                for i in range(ntimes):
+                    await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
+                    harness.atmcs.tel_mountEncoders.put(topic)
+
+            # Send applyCorrection command using default values, should get the position from the
+            # tel_mountEncoders telemetry.
+            cmd_attr = getattr(harness.aos_remote, f"cmd_applyCorrection")
+
+            await asyncio.gather(cmd_attr.start(cmd_attr.DataType(),
+                                                timeout=timeout),
+                                 publish_mountEnconders(azimuth, elevation))
+
+            # Give control back to event loop so it can gather remaining callbacks
+            await asyncio.sleep(5*salobj.base_csc.HEARTBEAT_INTERVAL)
+
+            # Check that callbacks where called
+            harness.pnematics.cmd_m1SetPressure.callback.assert_called()
+            harness.pnematics.cmd_m2SetPressure.callback.assert_called()
+            harness.hexapod.cmd_moveToPosition.callback.assert_called()
+            harness.aos_remote.evt_detailedState.callback.assert_called()
+            harness.aos_remote.evt_m1CorrectionStarted.callback.assert_called()
+            harness.aos_remote.evt_m2CorrectionStarted.callback.assert_called()
+            harness.aos_remote.evt_hexapodCorrectionStarted.callback.assert_called()
+            harness.aos_remote.evt_m1CorrectionCompleted.callback.assert_called()
+            harness.aos_remote.evt_m2CorrectionCompleted.callback.assert_called()
+            harness.aos_remote.evt_hexapodCorrectionCompleted.callback.assert_called()
+
+            self.assertEqual(len(harness.aos_remote.evt_detailedState.callback.call_args_list),
+                             6,
+                             '%s' % harness.aos_remote.evt_detailedState.callback.call_args_list)
+
+        asyncio.get_event_loop().run_until_complete(doit())
 
     def test_applyFocusOffset(self):
         """Test applyFocusOffset command."""
