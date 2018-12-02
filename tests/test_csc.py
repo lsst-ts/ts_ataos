@@ -12,6 +12,7 @@ import SALPY_ATAOS
 import SALPY_ATMCS
 import SALPY_ATPneumatics
 import SALPY_ATHexapod
+import SALPY_ATCamera
 
 np.random.seed(47)
 
@@ -30,6 +31,7 @@ class Harness:
         self.atmcs = salobj.Controller(SALPY_ATMCS)
         self.pnematics = salobj.Controller(SALPY_ATPneumatics)
         self.hexapod = salobj.Controller(SALPY_ATHexapod)
+        self.camera = salobj.Controller(SALPY_ATCamera)
 
     async def enable_csc(self):
         """Utility method to enable the Harness csc."""
@@ -162,7 +164,7 @@ class TestCSC(unittest.TestCase):
     def test_applyCorrection(self):
         """Test applyCorrection command. """
 
-        async def doit():
+        async def doit(get_tel_pos=True, while_exposing=False):
             harness = Harness()
             timeout = 5 * salobj.base_csc.HEARTBEAT_INTERVAL
             # Enable the CSC
@@ -191,7 +193,9 @@ class TestCSC(unittest.TestCase):
             await cmd_attr.start(send_topic,
                                  timeout=timeout)
 
-            # Check that applyCorrection works for current telescope position
+            #
+            # Check applyCorrection for position
+            #
             def callback(data):
                 pass
 
@@ -206,34 +210,55 @@ class TestCSC(unittest.TestCase):
             # Add callback to events
             harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
 
-            harness.aos_remote.evt_m1CorrectionStarted.callback = Mock(wraps=callback)
-            harness.aos_remote.evt_m2CorrectionStarted.callback = Mock(wraps=callback)
-            harness.aos_remote.evt_hexapodCorrectionStarted.callback = Mock(wraps=callback)
+            coro_m1_start = harness.aos_remote.evt_m1CorrectionStarted.next(flush=False,
+                                                                            timeout=timeout)
+            coro_m2_start = harness.aos_remote.evt_m2CorrectionStarted.next(flush=False,
+                                                                            timeout=timeout)
+            coro_hx_start = harness.aos_remote.evt_hexapodCorrectionStarted.next(flush=False,
+                                                                                 timeout=timeout)
 
-            harness.aos_remote.evt_m1CorrectionCompleted.callback = Mock(wraps=callback)
-            harness.aos_remote.evt_m2CorrectionCompleted.callback = Mock(wraps=callback)
-            harness.aos_remote.evt_hexapodCorrectionCompleted.callback = Mock(wraps=callback)
+            coro_m1_end = harness.aos_remote.evt_m1CorrectionCompleted.next(flush=False,
+                                                                            timeout=timeout)
+            coro_m2_end = harness.aos_remote.evt_m2CorrectionCompleted.next(flush=False,
+                                                                            timeout=timeout)
+            coro_hx_end = harness.aos_remote.evt_hexapodCorrectionCompleted.next(flush=False,
+                                                                                 timeout=timeout)
 
             # Publish telescope position using atmcs controller from harness
-            azimuth = 0.  # Test azimuth = 0.
+            topic = harness.atmcs.tel_mountEncoders.DataType()
+
+            azimuth = np.random.uniform(0., 360.)
             # make sure it is never zero because np.random.uniform is [min, max)
             elevation = 90.-np.random.uniform(0., 90.)
 
-            async def publish_mountEnconders(az, el, ntimes=5):
-                topic = harness.atmcs.tel_mountEncoders.DataType()
-                topic.azimuthCalculatedAngle = az
-                topic.elevationCalculatedAngle = el
+            topic.azimuthCalculatedAngle = azimuth
+            topic.elevationCalculatedAngle = elevation
+
+            async def publish_mountEnconders(topic, ntimes=5):
                 for i in range(ntimes):
                     await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
                     harness.atmcs.tel_mountEncoders.put(topic)
 
-            # Send applyCorrection command using default values, should get the position from the
-            # tel_mountEncoders telemetry.
+            # Test that the hexapod won't move if there's an exposure happening
+            if while_exposing:
+                shutter_state_topic = harness.camera.evt_shutterDetailedState.DataType()
+                shutter_state_topic.substate = ataos_csc.ShutterState.OPEN
+                harness.camera.evt_shutterDetailedState.put(shutter_state_topic)
+
+            # Send applyCorrection command
             cmd_attr = getattr(harness.aos_remote, f"cmd_applyCorrection")
 
-            await asyncio.gather(cmd_attr.start(cmd_attr.DataType(),
-                                                timeout=timeout),
-                                 publish_mountEnconders(azimuth, elevation))
+            if not get_tel_pos:
+                apply_correction_topic = cmd_attr.DataType()
+                apply_correction_topic.azimuth = azimuth
+                apply_correction_topic.elevation = elevation
+                # will not publish telescope position
+                await cmd_attr.start(apply_correction_topic,
+                                     timeout=timeout)
+            else:
+                await asyncio.gather(cmd_attr.start(cmd_attr.DataType(),
+                                                    timeout=timeout),
+                                     publish_mountEnconders(topic))
 
             # Give control back to event loop so it can gather remaining callbacks
             await asyncio.sleep(5*salobj.base_csc.HEARTBEAT_INTERVAL)
@@ -241,20 +266,52 @@ class TestCSC(unittest.TestCase):
             # Check that callbacks where called
             harness.pnematics.cmd_m1SetPressure.callback.assert_called()
             harness.pnematics.cmd_m2SetPressure.callback.assert_called()
-            harness.hexapod.cmd_moveToPosition.callback.assert_called()
+            if while_exposing:
+                harness.hexapod.cmd_moveToPosition.callback.assert_not_called()
+            else:
+                harness.hexapod.cmd_moveToPosition.callback.assert_called()
             harness.aos_remote.evt_detailedState.callback.assert_called()
-            harness.aos_remote.evt_m1CorrectionStarted.callback.assert_called()
-            harness.aos_remote.evt_m2CorrectionStarted.callback.assert_called()
-            harness.aos_remote.evt_hexapodCorrectionStarted.callback.assert_called()
-            harness.aos_remote.evt_m1CorrectionCompleted.callback.assert_called()
-            harness.aos_remote.evt_m2CorrectionCompleted.callback.assert_called()
-            harness.aos_remote.evt_hexapodCorrectionCompleted.callback.assert_called()
+
+            # Check that events where published with the correct az/el position
+            m1_start = await coro_m1_start
+            m2_start = await coro_m2_start
+
+            m1_end = await coro_m1_end
+            m2_end = await coro_m2_end
+
+            if while_exposing:
+                hx_start = None
+                hx_end = None
+                # hexapod should timeout
+                with self.assertRaises(asyncio.TimeoutError):
+                    await coro_hx_start
+                with self.assertRaises(asyncio.TimeoutError):
+                    await coro_hx_end
+            else:
+                hx_start = await coro_hx_start
+                hx_end = await coro_hx_end
+
+            for component in (m1_start, m2_start, hx_start, m1_end, m2_end, hx_end):
+                if component is None:
+                    continue
+                with self.subTest(component=component, topic=topic):
+                    self.assertEqual(component.azimuth, topic.azimuthCalculatedAngle)
+                with self.subTest(component=component, topic=topic):
+                    self.assertEqual(component.elevation, topic.elevationCalculatedAngle)
 
             self.assertEqual(len(harness.aos_remote.evt_detailedState.callback.call_args_list),
-                             6,
+                             6 if not while_exposing else 4,
                              '%s' % harness.aos_remote.evt_detailedState.callback.call_args_list)
 
-        asyncio.get_event_loop().run_until_complete(doit())
+        # Run test getting the telescope position
+        asyncio.get_event_loop().run_until_complete(doit(get_tel_pos=True))
+
+        # Run test getting the telescope position while exposing
+        asyncio.get_event_loop().run_until_complete(doit(get_tel_pos=True,
+                                                         while_exposing=True))
+
+        # Run for specified location
+        asyncio.get_event_loop().run_until_complete(doit(get_tel_pos=False))
 
     def test_applyFocusOffset(self):
         """Test applyFocusOffset command."""

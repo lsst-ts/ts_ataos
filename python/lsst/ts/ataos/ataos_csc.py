@@ -334,15 +334,15 @@ class ATAOS(base_csc.BaseCsc):
         topic.moveWhileExposing = self.move_while_exposing
         self.evt_correctionEnabled.put(topic)
 
-    def shutter_monitor_callback(self, id_data):
+    def shutter_monitor_callback(self, data):
         """A callback function to monitor the camera shutter.
 
         Parameters
         ----------
-        id_data : `CommandIdData`
+        data : `SALPY_ATCamera.ATCamera_logevent_shutterDetailedStateC`
             Command ID and data
         """
-        self.camera_exposing = id_data.data.substate == ShutterState.CLOSED
+        self.camera_exposing = data.substate != ShutterState.CLOSED
 
     async def set_pressure(self, mirror, azimuth, elevation):
         """
