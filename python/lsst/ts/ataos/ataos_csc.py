@@ -100,7 +100,7 @@ class ATAOS(base_csc.BaseCsc):
                             'hexapod': False,
                             'focus': False,
                             }
-        self.move_while_exposing = False
+        self.move_while_exposing = False  # TODO: ADD separate flag for pressure on m1 and m2 separately...
 
     @property
     def detailed_state(self):
@@ -165,10 +165,10 @@ class ATAOS(base_csc.BaseCsc):
         await asyncio.gather(self.set_hexapod(azimuth, elevation),
                              self.set_pressure("m1", azimuth, elevation),
                              self.set_pressure("m2", azimuth, elevation),
-                             )  # FIXME: What about focus?
+                             )  # FIXME: What about focus? YES, do focus separately
 
     async def do_applyFocusOffset(self, id_data):
-        """Adds a focus offset to the focus correction.
+        """Adds a focus offset to the focus correction. Same as apply focus but do the math...
 
         Parameters
         ----------
