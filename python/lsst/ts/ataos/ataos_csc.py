@@ -94,7 +94,8 @@ class ATAOS(base_csc.BaseCsc):
         self.camera.evt_shutterDetailedState.callback = self.shutter_monitor_callback
 
         # Corrections
-        self.valid_corrections = ('all', 'm1', 'm2', 'hexapod', 'focus', 'moveWhileExposing')
+        self.valid_corrections = ('enableAll', 'disableAll', 'm1', 'm2', 'hexapod', 'focus',
+                                  'moveWhileExposing')
         self.corrections = {'m1': False,
                             'm2': False,
                             'hexapod': False,
@@ -251,8 +252,16 @@ class ATAOS(base_csc.BaseCsc):
         AssertionError
             If one of more attribute of the topic is set to True.
         """
+        corrections = []
+        for corr in self.valid_corrections:
+            if hasattr(data, corr):
+                corrections.append(corr)
+        if len(corrections) == 0:
+            raise IOError(f"No correction found in {data}. At least one of {self.valid_corrections} "
+                          f"must be present.")
+
         assert any([getattr(data, corr)
-                    for corr in self.valid_corrections]), \
+                    for corr in corrections]), \
             "At least one correction must be set."
 
     def assert_corrections(self, mode):
@@ -317,7 +326,11 @@ class ATAOS(base_csc.BaseCsc):
         if data.moveWhileExposing:
             self.move_while_exposing = flag
 
-        if data.all:
+        if hasattr(data, "enableAll") and data.enableAll:
+            for key in self.corrections:
+                self.corrections[key] = flag
+            return
+        elif hasattr(data, "disableAll") and data.disableAll:
             for key in self.corrections:
                 self.corrections[key] = flag
             return

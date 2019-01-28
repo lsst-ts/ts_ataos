@@ -188,7 +188,7 @@ class TestCSC(unittest.TestCase):
             # Switch corrections off
             cmd_attr = getattr(harness.aos_remote, f"cmd_disableCorrection")
             send_topic = cmd_attr.DataType()
-            send_topic.all = True
+            send_topic.disableAll = True
 
             await cmd_attr.start(send_topic,
                                  timeout=timeout)
@@ -398,7 +398,7 @@ class TestCSC(unittest.TestCase):
             # everything is disable, send enable all.
             cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
             send_topic = cmd_attr.DataType()
-            send_topic.all = True
+            send_topic.enableAll = True
 
             coro = getattr(harness.aos_remote,
                            f"evt_correctionEnabled").next(flush=False,
@@ -424,7 +424,7 @@ class TestCSC(unittest.TestCase):
             # everything is enable, send disable all
             cmd_attr = getattr(harness.aos_remote, f"cmd_disableCorrection")
             send_topic = cmd_attr.DataType()
-            send_topic.all = True
+            send_topic.disableAll = True
 
             coro = getattr(harness.aos_remote,
                            f"evt_correctionEnabled").next(flush=False,
