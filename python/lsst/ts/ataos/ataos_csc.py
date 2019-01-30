@@ -149,7 +149,7 @@ class ATAOS(base_csc.BaseCsc):
             If one or more corrections are enabled.
         """
         self.assert_enabled('applyCorrection')
-        self.assert_corrections('disabled')
+        self.assert_corrections(0)
 
         # FIXME: Get position from telescope if elevation = 0.
         azimuth = id_data.data.azimuth
@@ -252,16 +252,9 @@ class ATAOS(base_csc.BaseCsc):
         AssertionError
             If one of more attribute of the topic is set to True.
         """
-        corrections = []
-        for corr in self.valid_corrections:
-            if hasattr(data, corr):
-                corrections.append(corr)
-        if len(corrections) == 0:
-            raise IOError(f"No correction found in {data}. At least one of {self.valid_corrections} "
-                          f"must be present.")
 
-        assert any([getattr(data, corr)
-                    for corr in corrections]), \
+        assert any([getattr(data, corr, False)
+                    for corr in self.corrections]), \
             "At least one correction must be set."
 
     def assert_corrections(self, mode):
@@ -269,8 +262,8 @@ class ATAOS(base_csc.BaseCsc):
 
         Parameters
         ----------
-        mode : str
-            Either enabled or disabled
+        mode : int
+            Specify if a correction is disabled (0) or enabled (1).
 
         Raises
         ------
@@ -279,19 +272,15 @@ class ATAOS(base_csc.BaseCsc):
         IOError
             If mode is not enabled or disabled
         """
-        if mode not in ('enabled', 'disabled'):
-            raise IOError("Mode must be either enabled or disabled")
+        if mode > 1:
+            raise ValueError("Mode must be either 0 (disabled) or 1 (enabled).")
 
-        enabled = ''
-        for key in self.corrections:
-            if self.corrections[key]:
-                enabled += key+','
-
-        if mode == 'enabled':
+        if mode == 1:
             assert any(self.corrections.values()), "All corrections disabled"
         else:
+            enabled_keys = [key for key, is_enabled in self.corrections.items() if is_enabled]
             assert not any(self.corrections.values()), \
-                "Corrections %s enabled: %s." % (enabled, self.corrections.items())
+                "Corrections %s enabled: %s." % (enabled_keys, self.corrections.items())
 
     def can_move(self):
         """Check that it is ok to move the hexapod.
@@ -326,11 +315,11 @@ class ATAOS(base_csc.BaseCsc):
         if data.moveWhileExposing:
             self.move_while_exposing = flag
 
-        if hasattr(data, "enableAll") and data.enableAll:
+        if getattr(data, "enableAll", False):
             for key in self.corrections:
                 self.corrections[key] = flag
             return
-        elif hasattr(data, "disableAll") and data.disableAll:
+        elif getattr(data, "disableAll", False):
             for key in self.corrections:
                 self.corrections[key] = flag
             return
@@ -341,11 +330,9 @@ class ATAOS(base_csc.BaseCsc):
 
     def publish_enable_corrections(self):
         """Utility function to publish enable corrections."""
-        topic = self.evt_correctionEnabled.DataType()
-        for key in self.corrections:
-            setattr(topic, key, self.corrections[key])
-        topic.moveWhileExposing = self.move_while_exposing
-        self.evt_correctionEnabled.put(topic)
+        kwargs = dict((key, value) for key, value in self.corrections.items())
+        kwargs["moveWhileExposing"] = self.move_while_exposing
+        self.evt_correctionEnabled.set_put(**kwargs)
 
     def shutter_monitor_callback(self, data):
         """A callback function to monitor the camera shutter.

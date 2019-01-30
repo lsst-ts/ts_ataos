@@ -172,26 +172,15 @@ class TestCSC(unittest.TestCase):
             self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
             # Check that applyCorrection fails if enable Correction is on
-            cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
+            harness.aos_remote.cmd_enableCorrection.set(m1=True)
+            await harness.aos_remote.cmd_enableCorrection.start(timeout=timeout)
 
-            send_topic = cmd_attr.DataType()
-            send_topic.m1 = True
-
-            await cmd_attr.start(send_topic,
-                                 timeout=timeout)
-
-            cmd_attr = getattr(harness.aos_remote, f"cmd_applyCorrection")
             with self.assertRaises(salobj.AckError):
-                await cmd_attr.start(cmd_attr.DataType(),
-                                     timeout=timeout)
+                await harness.aos_remote.cmd_applyCorrection.start(timeout=timeout)
 
             # Switch corrections off
-            cmd_attr = getattr(harness.aos_remote, f"cmd_disableCorrection")
-            send_topic = cmd_attr.DataType()
-            send_topic.disableAll = True
-
-            await cmd_attr.start(send_topic,
-                                 timeout=timeout)
+            harness.aos_remote.cmd_disableCorrection.set(disableAll=True)
+            await harness.aos_remote.cmd_disableCorrection.start(timeout=timeout)
 
             #
             # Check applyCorrection for position
@@ -249,15 +238,10 @@ class TestCSC(unittest.TestCase):
             cmd_attr = getattr(harness.aos_remote, f"cmd_applyCorrection")
 
             if not get_tel_pos:
-                apply_correction_topic = cmd_attr.DataType()
-                apply_correction_topic.azimuth = azimuth
-                apply_correction_topic.elevation = elevation
-                # will not publish telescope position
-                await cmd_attr.start(apply_correction_topic,
-                                     timeout=timeout)
+                cmd_attr.set(azimuth=azimuth, elevation=elevation)
+                cmd_attr.start(timeout=timeout)
             else:
-                await asyncio.gather(cmd_attr.start(cmd_attr.DataType(),
-                                                    timeout=timeout),
+                await asyncio.gather(cmd_attr.start(timeout=timeout),
                                      publish_mountEnconders(topic))
 
             # Give control back to event loop so it can gather remaining callbacks
