@@ -96,12 +96,13 @@ class ATAOS(base_csc.BaseCsc):
         # Corrections
         self.valid_corrections = ('enableAll', 'disableAll', 'm1', 'm2', 'hexapod', 'focus',
                                   'moveWhileExposing')
+
+        # TODO: ADD separate flag for pressure on m1 and m2 separately...
         self.corrections = {'m1': False,
                             'm2': False,
                             'hexapod': False,
                             'focus': False,
                             }
-        self.move_while_exposing = False  # TODO: ADD separate flag for pressure on m1 and m2 separately...
 
     @property
     def detailed_state(self):
@@ -123,6 +124,16 @@ class ATAOS(base_csc.BaseCsc):
         value
         """
         self._detailed_state = np.uint8(value)
+
+    @property
+    def move_while_exposing(self):
+        """Property to map the value of an attribute to the event topic."""
+        return self.evt_correctionEnabled.data.moveWhileExposing
+
+    @move_while_exposing.setter
+    def move_while_exposing(self, value):
+        """Set value of attribute directly to the event topic."""
+        self.evt_correctionEnabled.data.moveWhileExposing = value
 
     async def do_applyCorrection(self, id_data):
         """Apply correction on all components either for the current position of the telescope
@@ -331,7 +342,6 @@ class ATAOS(base_csc.BaseCsc):
     def publish_enable_corrections(self):
         """Utility function to publish enable corrections."""
         kwargs = dict((key, value) for key, value in self.corrections.items())
-        kwargs["moveWhileExposing"] = self.move_while_exposing
         self.evt_correctionEnabled.set_put(**kwargs)
 
     def shutter_monitor_callback(self, data):
