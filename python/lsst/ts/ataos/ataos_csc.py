@@ -160,7 +160,7 @@ class ATAOS(base_csc.BaseCsc):
             If one or more corrections are enabled.
         """
         self.assert_enabled('applyCorrection')
-        self.assert_corrections(0)
+        self.assert_corrections(enabled=False)
 
         # FIXME: Get position from telescope if elevation = 0.
         azimuth = id_data.data.azimuth
@@ -268,13 +268,13 @@ class ATAOS(base_csc.BaseCsc):
                     for corr in self.corrections]), \
             "At least one correction must be set."
 
-    def assert_corrections(self, mode):
+    def assert_corrections(self, enabled):
         """Check that the corrections are either enabled or disabled.
 
         Parameters
         ----------
-        mode : int
-            Specify if a correction is disabled (0) or enabled (1).
+        enabled : bool
+            Specify if a correction is enabled (True) or disabled (False).
 
         Raises
         ------
@@ -283,10 +283,8 @@ class ATAOS(base_csc.BaseCsc):
         IOError
             If mode is not enabled or disabled
         """
-        if mode > 1:
-            raise ValueError("Mode must be either 0 (disabled) or 1 (enabled).")
 
-        if mode == 1:
+        if enabled:
             assert any(self.corrections.values()), "All corrections disabled"
         else:
             enabled_keys = [key for key, is_enabled in self.corrections.items() if is_enabled]
@@ -326,6 +324,12 @@ class ATAOS(base_csc.BaseCsc):
         if data.moveWhileExposing:
             self.move_while_exposing = flag
 
+        # Note that ATAOS_command_disableCorrectionC and ATAOS_command_enableCorrectionC topics have
+        # different names for the attribute that acts on all axis. They could have the same name but I
+        # wanted to make sure it is clear that when someone uses ATAOS_command_disableCorrectionC.disableAll
+        # they really understand they are disabling all corrections and vice-versa. With the different names
+        # I'm forced to do the following getattr logic. Either that or check the type of the input. But I
+        # think this looks cleaner.
         if getattr(data, "enableAll", False):
             for key in self.corrections:
                 self.corrections[key] = flag
