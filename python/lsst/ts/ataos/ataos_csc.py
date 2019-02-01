@@ -94,13 +94,15 @@ class ATAOS(base_csc.BaseCsc):
         self.camera.evt_shutterDetailedState.callback = self.shutter_monitor_callback
 
         # Corrections
-        self.valid_corrections = ('all', 'm1', 'm2', 'hexapod', 'focus', 'moveWhileExposing')
+        self.valid_corrections = ('enableAll', 'disableAll', 'm1', 'm2', 'hexapod', 'focus',
+                                  'moveWhileExposing')
+
+        # TODO: ADD separate flag for pressure on m1 and m2 separately...
         self.corrections = {'m1': False,
                             'm2': False,
                             'hexapod': False,
                             'focus': False,
                             }
-        self.move_while_exposing = False
 
     @property
     def detailed_state(self):
@@ -122,6 +124,16 @@ class ATAOS(base_csc.BaseCsc):
         value
         """
         self._detailed_state = np.uint8(value)
+
+    @property
+    def move_while_exposing(self):
+        """Property to map the value of an attribute to the event topic."""
+        return self.evt_correctionEnabled.data.moveWhileExposing
+
+    @move_while_exposing.setter
+    def move_while_exposing(self, value):
+        """Set value of attribute directly to the event topic."""
+        self.evt_correctionEnabled.data.moveWhileExposing = value
 
     async def do_applyCorrection(self, id_data):
         """Apply correction on all components either for the current position of the telescope
@@ -148,7 +160,7 @@ class ATAOS(base_csc.BaseCsc):
             If one or more corrections are enabled.
         """
         self.assert_enabled('applyCorrection')
-        self.assert_corrections('disabled')
+        self.assert_corrections(enabled=False)
 
         # FIXME: Get position from telescope if elevation = 0.
         azimuth = id_data.data.azimuth
@@ -165,10 +177,10 @@ class ATAOS(base_csc.BaseCsc):
         await asyncio.gather(self.set_hexapod(azimuth, elevation),
                              self.set_pressure("m1", azimuth, elevation),
                              self.set_pressure("m2", azimuth, elevation),
-                             )  # FIXME: What about focus?
+                             )  # FIXME: What about focus? YES, do focus separately
 
     async def do_applyFocusOffset(self, id_data):
-        """Adds a focus offset to the focus correction.
+        """Adds a focus offset to the focus correction. Same as apply focus but do the math...
 
         Parameters
         ----------
@@ -251,17 +263,18 @@ class ATAOS(base_csc.BaseCsc):
         AssertionError
             If one of more attribute of the topic is set to True.
         """
-        assert any([getattr(data, corr)
-                    for corr in self.valid_corrections]), \
+
+        assert any([getattr(data, corr, False)
+                    for corr in self.corrections]), \
             "At least one correction must be set."
 
-    def assert_corrections(self, mode):
+    def assert_corrections(self, enabled):
         """Check that the corrections are either enabled or disabled.
 
         Parameters
         ----------
-        mode : str
-            Either enabled or disabled
+        enabled : bool
+            Specify if a correction is enabled (True) or disabled (False).
 
         Raises
         ------
@@ -270,19 +283,13 @@ class ATAOS(base_csc.BaseCsc):
         IOError
             If mode is not enabled or disabled
         """
-        if mode not in ('enabled', 'disabled'):
-            raise IOError("Mode must be either enabled or disabled")
 
-        enabled = ''
-        for key in self.corrections:
-            if self.corrections[key]:
-                enabled += key+','
-
-        if mode == 'enabled':
+        if enabled:
             assert any(self.corrections.values()), "All corrections disabled"
         else:
+            enabled_keys = [key for key, is_enabled in self.corrections.items() if is_enabled]
             assert not any(self.corrections.values()), \
-                "Corrections %s enabled: %s." % (enabled, self.corrections.items())
+                "Corrections %s enabled: %s." % (enabled_keys, self.corrections.items())
 
     def can_move(self):
         """Check that it is ok to move the hexapod.
@@ -317,7 +324,17 @@ class ATAOS(base_csc.BaseCsc):
         if data.moveWhileExposing:
             self.move_while_exposing = flag
 
-        if data.all:
+        # Note that ATAOS_command_disableCorrectionC and ATAOS_command_enableCorrectionC topics have
+        # different names for the attribute that acts on all axis. They could have the same name but I
+        # wanted to make sure it is clear that when someone uses ATAOS_command_disableCorrectionC.disableAll
+        # they really understand they are disabling all corrections and vice-versa. With the different names
+        # I'm forced to do the following getattr logic. Either that or check the type of the input. But I
+        # think this looks cleaner.
+        if getattr(data, "enableAll", False):
+            for key in self.corrections:
+                self.corrections[key] = flag
+            return
+        elif getattr(data, "disableAll", False):
             for key in self.corrections:
                 self.corrections[key] = flag
             return
@@ -328,11 +345,8 @@ class ATAOS(base_csc.BaseCsc):
 
     def publish_enable_corrections(self):
         """Utility function to publish enable corrections."""
-        topic = self.evt_correctionEnabled.DataType()
-        for key in self.corrections:
-            setattr(topic, key, self.corrections[key])
-        topic.moveWhileExposing = self.move_while_exposing
-        self.evt_correctionEnabled.put(topic)
+        kwargs = dict((key, value) for key, value in self.corrections.items())
+        self.evt_correctionEnabled.set_put(**kwargs)
 
     def shutter_monitor_callback(self, data):
         """A callback function to monitor the camera shutter.
