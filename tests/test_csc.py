@@ -1,7 +1,9 @@
+import sys
 import unittest
 from unittest.mock import Mock
 import asyncio
 import numpy as np
+import logging
 
 from lsst.ts import salobj
 
@@ -9,7 +11,7 @@ from lsst.ts.ataos import ataos_csc
 
 import SALPY_ATAOS
 
-import SALPY_ATMCS
+import SALPY_ATPtg
 import SALPY_ATPneumatics
 import SALPY_ATHexapod
 import SALPY_ATCamera
@@ -17,6 +19,34 @@ import SALPY_ATCamera
 np.random.seed(47)
 
 index_gen = salobj.index_generator()
+
+logger = logging.getLogger()
+logger.level = logging.DEBUG
+
+
+def float_to_str(ang, sep=":"):
+    """A utility method to convert a float angle in degrees
+    to the string representation "+DD:MM:SS.". No angle wraps
+    is applied.
+
+    Parameters
+    ----------
+    ang : float
+        Angle in degrees
+    sep : str
+        The separator string. By default ":" is used.
+
+    Returns
+    -------
+    ang_deg : str
+        The converted value. No wrap limit is applied.
+    """
+    frac, dd = np.modf(np.abs(ang))
+    ss, mm = np.modf(frac*60.)
+    ss *= 60.
+    dd *= -1. if ang < 0. else 1
+    ang_deg = "%+2.0f%s%2.0f%s%2.5f" % (dd, sep, mm, sep, ss)
+    return ang_deg
 
 
 class Harness:
@@ -28,7 +58,7 @@ class Harness:
         self.aos_remote = salobj.Remote(SALPY_ATAOS)
 
         # Adds Controllers to receive commands from the ATAOS system
-        self.atmcs = salobj.Controller(SALPY_ATMCS)
+        self.atptg = salobj.Controller(SALPY_ATPtg)
         self.pnematics = salobj.Controller(SALPY_ATPneumatics)
         self.hexapod = salobj.Controller(SALPY_ATHexapod)
         self.camera = salobj.Controller(SALPY_ATCamera)
@@ -213,20 +243,20 @@ class TestCSC(unittest.TestCase):
             coro_hx_end = harness.aos_remote.evt_hexapodCorrectionCompleted.next(flush=False,
                                                                                  timeout=timeout)
 
-            # Publish telescope position using atmcs controller from harness
-            topic = harness.atmcs.tel_mountEncoders.DataType()
+            # Publish telescope position using atptg controller from harness
+            topic = harness.atptg.tel_currentTargetStatus.DataType()
 
             azimuth = np.random.uniform(0., 360.)
             # make sure it is never zero because np.random.uniform is [min, max)
             elevation = 90.-np.random.uniform(0., 90.)
 
-            topic.azimuthCalculatedAngle = azimuth
-            topic.elevationCalculatedAngle = elevation
+            topic.demandAz = float_to_str(azimuth)
+            topic.demandEl = float_to_str(elevation)
 
             async def publish_mountEnconders(topic, ntimes=5):
                 for i in range(ntimes):
                     await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
-                    harness.atmcs.tel_mountEncoders.put(topic)
+                    harness.atptg.tel_currentTargetStatus.put(topic)
 
             # Test that the hexapod won't move if there's an exposure happening
             if while_exposing:
@@ -279,9 +309,9 @@ class TestCSC(unittest.TestCase):
                 if component is None:
                     continue
                 with self.subTest(component=component, topic=topic):
-                    self.assertEqual(component.azimuth, topic.azimuthCalculatedAngle)
+                    self.assertEqual(float_to_str(component.azimuth), topic.demandAz)
                 with self.subTest(component=component, topic=topic):
-                    self.assertEqual(component.elevation, topic.elevationCalculatedAngle)
+                    self.assertEqual(float_to_str(component.elevation), topic.demandEl)
 
             self.assertEqual(len(harness.aos_remote.evt_detailedState.callback.call_args_list),
                              6 if not while_exposing else 4,
@@ -332,13 +362,15 @@ class TestCSC(unittest.TestCase):
                 # Note: Setting only the correction I want to enable. Any correction already
                 # enabled will be left unchanged. This is part of the test.
                 setattr(send_topic, corr, True)
-
+                logger.debug(corr)
                 coro = getattr(harness.aos_remote,
                                f"evt_correctionEnabled").next(flush=False,
                                                               timeout=timeout)
                 await cmd_attr.start(send_topic,
                                      timeout=timeout)
+                logger.debug(f"TEST 1: {corr}")
                 receive_topic = await coro
+                logger.debug(f"TEST 2: {corr}")
                 for test_corr in corrections:
                     with self.subTest(test_corr=test_corr):
                         self.assertEqual(getattr(receive_topic, test_corr),
@@ -426,6 +458,9 @@ class TestCSC(unittest.TestCase):
                                                               "False",
                                                               getattr(receive_topic, test_corr)))
 
+        stream_handler = logging.StreamHandler(sys.stdout)
+        logger.addHandler(stream_handler)
+
         asyncio.get_event_loop().run_until_complete(doit())
 
     def test_setFocus(self):
@@ -434,4 +469,8 @@ class TestCSC(unittest.TestCase):
 
 
 if __name__ == '__main__':
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    logger.addHandler(stream_handler)
+
     unittest.main()
