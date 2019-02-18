@@ -1,12 +1,13 @@
 
 import asyncio
-import logging
 import enum
 import numpy as np
+from astropy.coordinates import Angle
+import astropy.units as u
 
 import SALPY_ATAOS
 
-import SALPY_ATMCS
+import SALPY_ATPtg
 import SALPY_ATPneumatics
 import SALPY_ATHexapod
 import SALPY_ATCamera
@@ -56,8 +57,6 @@ class ATAOS(base_csc.BaseCsc):
         """
         Initialize AT AOS CSC.
         """
-        self.log = logging.getLogger("ATAOS")
-
         self.model = Model()  # instantiate the model so I can have the settings once the component is up
 
         super().__init__(SALPY_ATAOS)
@@ -85,7 +84,7 @@ class ATAOS(base_csc.BaseCsc):
         self.camera_exposing = False  # flag to monitor if camera is exposing
 
         # Remotes
-        self.mcs = Remote(SALPY_ATMCS)
+        self.ptg = Remote(SALPY_ATPtg)
         self.pneumatics = Remote(SALPY_ATPneumatics)
         self.hexapod = Remote(SALPY_ATHexapod)
         self.camera = Remote(SALPY_ATCamera)
@@ -103,6 +102,7 @@ class ATAOS(base_csc.BaseCsc):
                             'hexapod': False,
                             'focus': False,
                             }
+        self._move_while_exposing = False
 
     @property
     def detailed_state(self):
@@ -128,12 +128,15 @@ class ATAOS(base_csc.BaseCsc):
     @property
     def move_while_exposing(self):
         """Property to map the value of an attribute to the event topic."""
-        return self.evt_correctionEnabled.data.moveWhileExposing
+        return bool(self._move_while_exposing)  # bool(self.evt_correctionEnabled.data.moveWhileExposing)
 
     @move_while_exposing.setter
     def move_while_exposing(self, value):
         """Set value of attribute directly to the event topic."""
-        self.evt_correctionEnabled.data.moveWhileExposing = value
+        # FIXME: For some reason setting and getting straight out of the topic was not working
+        # I'll leave this as a placeholder here and debug this properly later.
+        # self.evt_correctionEnabled.set(moveWhileExposing=bool(value))
+        self._move_while_exposing = bool(value)
 
     async def do_applyCorrection(self, id_data):
         """Apply correction on all components either for the current position of the telescope
@@ -144,7 +147,7 @@ class ATAOS(base_csc.BaseCsc):
         and azimuth=0, the correction is applied at the specified position.
 
         Angles wraps:
-            azimuth: [0., 360.] degrees
+            azimuth: Absolute azimuth angle. Angle will be converted to the 0 - 360 wrap.
             elevation: (0., 90.] degrees (Model may still apply more restringing limits)
 
         Parameters
@@ -163,15 +166,17 @@ class ATAOS(base_csc.BaseCsc):
         self.assert_corrections(enabled=False)
 
         # FIXME: Get position from telescope if elevation = 0.
-        azimuth = id_data.data.azimuth
+        azimuth = id_data.data.azimuth % 360.
         elevation = id_data.data.elevation
 
         if elevation == 0.:
             # Get telescope position. Will flush data stream in order to get the most updated position
-            position = await self.mcs.tel_mountEncoders.next(flush=True,
-                                                             timeout=self.cmd_timeout)
-            azimuth = position.azimuthCalculatedAngle
-            elevation = position.elevationCalculatedAngle
+            position = await self.ptg.tel_currentTargetStatus.next(flush=True,
+                                                                   timeout=self.cmd_timeout)
+            # These values comes as +DD:MM:SS.SS strings from the pointing component. Need to parse them
+            # to floats here. Use astropy.coordinates.Angle to make the conversion.
+            azimuth = Angle(position.demandAz, u.deg).wrap_to(Angle(360, u.deg)).deg
+            elevation = Angle(position.demandEl, u.deg).deg
 
         # run corrections concurrently
         await asyncio.gather(self.set_hexapod(azimuth, elevation),
@@ -265,7 +270,7 @@ class ATAOS(base_csc.BaseCsc):
         """
 
         assert any([getattr(data, corr, False)
-                    for corr in self.corrections]), \
+                    for corr in self.valid_corrections]), \
             "At least one correction must be set."
 
     def assert_corrections(self, enabled):
@@ -323,7 +328,6 @@ class ATAOS(base_csc.BaseCsc):
         """
         if data.moveWhileExposing:
             self.move_while_exposing = flag
-
         # Note that ATAOS_command_disableCorrectionC and ATAOS_command_enableCorrectionC topics have
         # different names for the attribute that acts on all axis. They could have the same name but I
         # wanted to make sure it is clear that when someone uses ATAOS_command_disableCorrectionC.disableAll
@@ -346,7 +350,8 @@ class ATAOS(base_csc.BaseCsc):
     def publish_enable_corrections(self):
         """Utility function to publish enable corrections."""
         kwargs = dict((key, value) for key, value in self.corrections.items())
-        self.evt_correctionEnabled.set_put(**kwargs)
+        self.evt_correctionEnabled.set_put(moveWhileExposing=self.move_while_exposing,
+                                           **kwargs)
 
     def shutter_monitor_callback(self, data):
         """A callback function to monitor the camera shutter.
