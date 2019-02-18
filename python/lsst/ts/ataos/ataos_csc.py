@@ -2,6 +2,8 @@
 import asyncio
 import enum
 import numpy as np
+from astropy.coordinates import Angle
+import astropy.units as u
 
 import SALPY_ATAOS
 
@@ -18,31 +20,6 @@ __all__ = ['ATAOS', 'ShutterState']
 
 SEEING_LOOP_DONE = 101
 TELEMETRY_LOOP_DONE = 102
-
-
-def str_to_float(ang, sep=":"):
-    """A utility method to convert a string angle in the format "+DD:MM:SS." or
-    "+HH:MM:SS." to
-    the float representation.
-
-    Parameters
-    ----------
-    ang : str
-        A string with the format "+DD:MM:SS." or "+HH:MM:SS."
-
-    sep : str
-        The separator string. By default ":" is used.
-
-    Returns
-    -------
-    ang_deg : float
-        The converted value. No wrap limit is applied.
-    """
-    dd, mm, ss = ang.split(sep)
-    ang_deg = np.abs(float(dd))+float(mm)/60.+float(ss)/3600.
-    ang_deg *= -1. if float(dd) < 0. else 1.  # handle negative numbers
-
-    return ang_deg
 
 
 class ShutterState(enum.IntEnum):
@@ -156,6 +133,8 @@ class ATAOS(base_csc.BaseCsc):
     @move_while_exposing.setter
     def move_while_exposing(self, value):
         """Set value of attribute directly to the event topic."""
+        # FIXME: For some reason setting and getting straight out of the topic was not working
+        # I'll leave this as a placeholder here and debug this properly later.
         # self.evt_correctionEnabled.set(moveWhileExposing=bool(value))
         self._move_while_exposing = bool(value)
 
@@ -195,10 +174,9 @@ class ATAOS(base_csc.BaseCsc):
             position = await self.ptg.tel_currentTargetStatus.next(flush=True,
                                                                    timeout=self.cmd_timeout)
             # These values comes as +DD:MM:SS.SS strings from the pointing component. Need to parse them
-            # to floats here.
-            # wrapping azimuth between 0 and 360, ataos dont care about wrap.
-            azimuth = str_to_float(position.demandAz) % 360.
-            elevation = str_to_float(position.demandEl)
+            # to floats here. Use astropy.coordinates.Angle to make the conversion.
+            azimuth = Angle(position.demandAz, u.deg).wrap_to(Angle(360, u.deg)).deg
+            elevation = Angle(position.demandEl, u.deg).deg
 
         # run corrections concurrently
         await asyncio.gather(self.set_hexapod(azimuth, elevation),
@@ -372,8 +350,8 @@ class ATAOS(base_csc.BaseCsc):
     def publish_enable_corrections(self):
         """Utility function to publish enable corrections."""
         kwargs = dict((key, value) for key, value in self.corrections.items())
-        kwargs["moveWhileExposing"] = self.move_while_exposing
-        self.evt_correctionEnabled.set_put(**kwargs)
+        self.evt_correctionEnabled.set_put(moveWhileExposing=self.move_while_exposing,
+                                           **kwargs)
 
     def shutter_monitor_callback(self, data):
         """A callback function to monitor the camera shutter.

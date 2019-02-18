@@ -4,6 +4,8 @@ from unittest.mock import Mock
 import asyncio
 import numpy as np
 import logging
+from astropy.coordinates import Angle
+import astropy.units as u
 
 from lsst.ts import salobj
 
@@ -22,31 +24,6 @@ index_gen = salobj.index_generator()
 
 logger = logging.getLogger()
 logger.level = logging.DEBUG
-
-
-def float_to_str(ang, sep=":"):
-    """A utility method to convert a float angle in degrees
-    to the string representation "+DD:MM:SS.". No angle wraps
-    is applied.
-
-    Parameters
-    ----------
-    ang : float
-        Angle in degrees
-    sep : str
-        The separator string. By default ":" is used.
-
-    Returns
-    -------
-    ang_deg : str
-        The converted value. No wrap limit is applied.
-    """
-    frac, dd = np.modf(np.abs(ang))
-    ss, mm = np.modf(frac*60.)
-    ss *= 60.
-    dd *= -1. if ang < 0. else 1
-    ang_deg = "%+2.0f%s%2.0f%s%2.5f" % (dd, sep, mm, sep, ss)
-    return ang_deg
 
 
 class Harness:
@@ -250,8 +227,8 @@ class TestCSC(unittest.TestCase):
             # make sure it is never zero because np.random.uniform is [min, max)
             elevation = 90.-np.random.uniform(0., 90.)
 
-            topic.demandAz = float_to_str(azimuth)
-            topic.demandEl = float_to_str(elevation)
+            topic.demandAz = Angle(azimuth, u.deg).to_string(unit=u.deg, sep=':')
+            topic.demandEl = Angle(elevation, u.deg).to_string(unit=u.deg, sep=':')
 
             async def publish_mountEnconders(topic, ntimes=5):
                 for i in range(ntimes):
