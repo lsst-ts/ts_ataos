@@ -199,7 +199,8 @@ class TestCSC(unittest.TestCase):
             harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
             harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
 
-            # FIXME: Check if this is correct! Is there a difference in command to move hexapod and focus
+            # FIXME: Check if this is correct! Is there is a difference in
+            # command to move hexapod and focus
             # or they will use the same command?
             harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=callback)
 
@@ -232,14 +233,18 @@ class TestCSC(unittest.TestCase):
 
             async def publish_mountEnconders(topic, ntimes=5):
                 for i in range(ntimes):
-                    await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
                     harness.atptg.tel_currentTargetStatus.put(topic)
+                    await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
+
+            await publish_mountEnconders(topic)
 
             # Test that the hexapod won't move if there's an exposure happening
             if while_exposing:
                 shutter_state_topic = harness.camera.evt_shutterDetailedState.DataType()
                 shutter_state_topic.substate = ataos_csc.ShutterState.OPEN
                 harness.camera.evt_shutterDetailedState.put(shutter_state_topic)
+                # Give some time for the CSC to grab that event
+                await asyncio.sleep(2.)
 
             # Send applyCorrection command
             cmd_attr = getattr(harness.aos_remote, f"cmd_applyCorrection")
@@ -248,8 +253,7 @@ class TestCSC(unittest.TestCase):
                 cmd_attr.set(azimuth=azimuth, elevation=elevation)
                 cmd_attr.start(timeout=timeout)
             else:
-                await asyncio.gather(cmd_attr.start(timeout=timeout),
-                                     publish_mountEnconders(topic))
+                await cmd_attr.start(timeout=timeout)
 
             # Give control back to event loop so it can gather remaining callbacks
             await asyncio.sleep(5*salobj.base_csc.HEARTBEAT_INTERVAL)
@@ -285,14 +289,22 @@ class TestCSC(unittest.TestCase):
             for component in (m1_start, m2_start, hx_start, m1_end, m2_end, hx_end):
                 if component is None:
                     continue
+
                 with self.subTest(component=component, topic=topic):
-                    self.assertEqual(float_to_str(component.azimuth), topic.demandAz)
+                    self.assertEqual(Angle(component.azimuth,
+                                           u.deg).to_string(unit=u.deg, sep=':'),
+                                     topic.demandAz)
                 with self.subTest(component=component, topic=topic):
-                    self.assertEqual(float_to_str(component.elevation), topic.demandEl)
+                    self.assertEqual(Angle(component.elevation,
+                                           u.deg).to_string(unit=u.deg, sep=':'),
+                                     topic.demandEl)
 
             self.assertEqual(len(harness.aos_remote.evt_detailedState.callback.call_args_list),
                              6 if not while_exposing else 4,
                              '%s' % harness.aos_remote.evt_detailedState.callback.call_args_list)
+
+            # disable CSC
+            await harness.aos_remote.cmd_disable.start(timeout=timeout)
 
         # Run test getting the telescope position
         asyncio.get_event_loop().run_until_complete(doit(get_tel_pos=True))

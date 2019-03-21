@@ -1,5 +1,6 @@
 
 import asyncio
+import traceback
 import enum
 import numpy as np
 from astropy.coordinates import Angle
@@ -12,14 +13,16 @@ import SALPY_ATPneumatics
 import SALPY_ATHexapod
 import SALPY_ATCamera
 
-from lsst.ts.salobj import base_csc, Remote
+from lsst.ts.salobj import base_csc, Remote, State
 
 from .model import Model
 
-__all__ = ['ATAOS', 'ShutterState']
+__all__ = ['ATAOS', 'ShutterState', "DetailedState"]
 
-SEEING_LOOP_DONE = 101
-TELEMETRY_LOOP_DONE = 102
+CORRECTION_LOOP_DIED = 8103
+"""Error code for when the correction loop dies and the CSC is in enable
+state.
+"""
 
 
 class ShutterState(enum.IntEnum):
@@ -74,20 +77,21 @@ class ATAOS(base_csc.BaseCsc):
         # how long to wait for the loops to die? = 5 heartbeats
         self.loop_die_timeout = 5.*base_csc.HEARTBEAT_INTERVAL
         # regular timeout for commands to remotes = 5 heartbeats
-        self.cmd_timeout = 5.*base_csc.HEARTBEAT_INTERVAL
+        self.cmd_timeout = 60.*base_csc.HEARTBEAT_INTERVAL
 
-        self.telemetry_loop_running = False
-        self.telemetry_loop_task = None
-
-        self.health_monitor_loop_task = asyncio.ensure_future(self.health_monitor())
+        self.correction_loop_task = None
 
         self.camera_exposing = False  # flag to monitor if camera is exposing
 
         # Remotes
-        self.ptg = Remote(SALPY_ATPtg)
-        self.pneumatics = Remote(SALPY_ATPneumatics)
-        self.hexapod = Remote(SALPY_ATHexapod)
-        self.camera = Remote(SALPY_ATCamera)
+        self.ptg = Remote(SALPY_ATPtg, include=["currentTargetStatus"])
+        self.pneumatics = Remote(SALPY_ATPneumatics, include=["m1SetPressure",
+                                                              "m2SetPressure"])
+        self.hexapod = Remote(SALPY_ATHexapod, include=["moveToPosition"])
+        self.camera = Remote(SALPY_ATCamera, include=["shutterDetailedState"])
+
+        self.azimuth = None
+        self.elevation = None
 
         # Add required callbacks
         self.camera.evt_shutterDetailedState.callback = self.shutter_monitor_callback
@@ -96,12 +100,20 @@ class ATAOS(base_csc.BaseCsc):
         self.valid_corrections = ('enableAll', 'disableAll', 'm1', 'm2', 'hexapod', 'focus',
                                   'moveWhileExposing')
 
-        # TODO: ADD separate flag for pressure on m1 and m2 separately...
         self.corrections = {'m1': False,
                             'm2': False,
                             'hexapod': False,
                             'focus': False,
                             }
+
+        # Note that focus is not part of corrections routines, focus correction
+        # is performed by the hexapod. A different logic is used when focus
+        # only correction is requested.
+        self.corrections_routines = {'m1': self.set_pressure_m1,
+                                     'm2': self.set_pressure_m2,
+                                     'hexapod': self.set_hexapod
+                                     }
+
         self._move_while_exposing = False
 
     @property
@@ -128,27 +140,66 @@ class ATAOS(base_csc.BaseCsc):
     @property
     def move_while_exposing(self):
         """Property to map the value of an attribute to the event topic."""
-        return bool(self._move_while_exposing)  # bool(self.evt_correctionEnabled.data.moveWhileExposing)
+        # bool(self.evt_correctionEnabled.data.moveWhileExposing)
+        return bool(self._move_while_exposing)
 
     @move_while_exposing.setter
     def move_while_exposing(self, value):
         """Set value of attribute directly to the event topic."""
-        # FIXME: For some reason setting and getting straight out of the topic was not working
-        # I'll leave this as a placeholder here and debug this properly later.
+        # FIXME: For some reason setting and getting straight out of the
+        # topic was not working I'll leave this as a placeholder here and
+        # debug this properly later.
         # self.evt_correctionEnabled.set(moveWhileExposing=bool(value))
         self._move_while_exposing = bool(value)
 
-    async def do_applyCorrection(self, id_data):
-        """Apply correction on all components either for the current position of the telescope
-        (default) or the specified position.
+    def end_enable(self, id_data):
+        """End do_enable; called after state changes but before command
+        acknowledged.
 
-        Since SAL does not allow definition of default parameters, azimuth = 0. and
-        altitude = 0. is considered as "current telescope position". Note that, if altitude > 0
-        and azimuth=0, the correction is applied at the specified position.
+        It will add `self.correction_loop` to the event loop.
+
+        Parameters
+        ----------
+        id_data : `CommandIdData`
+            Command ID and data
+        """
+        self.ptg.tel_currentTargetStatus.callback = self.update_position_callback
+        self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
+
+    def end_disable(self, id_data):
+        """End do_disable; called after state changes but before command
+        acknowledged.
+
+        Makes sure correction loop is cancelled appropriately.
+
+        Parameters
+        ----------
+        id_data : `CommandIdData`
+            Command ID and data
+        """
+        self.ptg.tel_currentTargetStatus.callback = None
+        if not self.correction_loop_task.done():
+            self.correction_loop_task.cancel()
+
+        self.correction_loop_task = None
+        disable = self.cmd_disableCorrection.DataType()
+        disable.disableAll = True
+        self.mark_corrections(disable, False)
+
+    async def do_applyCorrection(self, id_data):
+        """Apply correction on all components either for the current position
+        of the telescope (default) or the specified position.
+
+        Since SAL does not allow definition of default parameters,
+        azimuth = 0. and altitude = 0. is considered as "current telescope
+        position". Note that, if altitude > 0 and azimuth=0, the correction is
+        applied at the specified position.
 
         Angles wraps:
-            azimuth: Absolute azimuth angle. Angle will be converted to the 0 - 360 wrap.
-            elevation: (0., 90.] degrees (Model may still apply more restringing limits)
+            azimuth: Absolute azimuth angle. Angle will be converted to the
+                0 - 360 wrap.
+            elevation: (0., 90.] degrees (Model may still apply more
+                restringing limits)
 
         Parameters
         ----------
@@ -170,13 +221,12 @@ class ATAOS(base_csc.BaseCsc):
         elevation = id_data.data.elevation
 
         if elevation == 0.:
-            # Get telescope position. Will flush data stream in order to get the most updated position
-            position = await self.ptg.tel_currentTargetStatus.next(flush=True,
-                                                                   timeout=self.cmd_timeout)
-            # These values comes as +DD:MM:SS.SS strings from the pointing component. Need to parse them
-            # to floats here. Use astropy.coordinates.Angle to make the conversion.
-            azimuth = Angle(position.demandAz, u.deg).wrap_to(Angle(360, u.deg)).deg
-            elevation = Angle(position.demandEl, u.deg).deg
+            if self.azimuth is None or self.elevation is None:
+                raise RuntimeError("No information about telescope azimuth and/or "
+                                   "elevation available.")
+            # Get telescope position stored by callback function.
+            azimuth = self.azimuth
+            elevation = self.elevation
 
         # run corrections concurrently
         await asyncio.gather(self.set_hexapod(azimuth, elevation),
@@ -185,7 +235,8 @@ class ATAOS(base_csc.BaseCsc):
                              )  # FIXME: What about focus? YES, do focus separately
 
     async def do_applyFocusOffset(self, id_data):
-        """Adds a focus offset to the focus correction. Same as apply focus but do the math...
+        """Adds a focus offset to the focus correction. Same as apply focus
+         but do the math...
 
         Parameters
         ----------
@@ -197,12 +248,13 @@ class ATAOS(base_csc.BaseCsc):
     async def do_enableCorrection(self, id_data):
         """Enable corrections on specified axis.
 
-        This method only works for enabling features, it won't disable any of the features off
-        (including `move_while_exposing`).
+        This method only works for enabling features, it won't disable any of
+        the features off (including `move_while_exposing`).
 
-        Components set to False in this command won't cause any affect, e.g. if m1 correction is
-        enabled and `enable_correction` receives `id_data.data.m1=False`, the correction will still be
-        enabled afterwards. To disable a correction (or `move_while_exposing`) use
+        Components set to False in this command won't cause any affect, e.g.
+        if m1 correction is enabled and `enable_correction` receives
+        `id_data.data.m1=False`, the correction will still be enabled
+        afterwards. To disable a correction (or `move_while_exposing`) use
         `do_disableCorrection()`.
 
         Parameters
@@ -246,22 +298,56 @@ class ATAOS(base_csc.BaseCsc):
         self.assert_enabled('setFocus')
 
     async def health_monitor(self):
-        """Monitor general health of component. Transition publish `errorCode` and transition
-        to FAULT state if anything bad happens.
+        """Monitor general health of component. Transition publish `errorCode`
+        and transition to FAULT state if anything bad happens.
         """
-        asyncio.sleep(0)
+        while True:
+            asyncio.sleep(base_csc.HEARTBEAT_INTERVAL)
 
     async def correction_loop(self):
-        """Coroutine to send corrections to m1, m2, hexapod and focus."""
-        pass
+        """Coroutine to send corrections to m1, m2, hexapod and focus at
+        the heartbeat frequency."""
+
+        while self.summary_state == State.ENABLED:
+            try:
+
+                # The heartbeat wait is folded here so instead of applying and
+                # then waiting, the loop applies and wait at the same time.
+                corrections_to_apply = [asyncio.sleep(base_csc.HEARTBEAT_INTERVAL)]
+                if self.azimuth is not None and self.elevation is not None:
+                    for correction in self.corrections:
+                        if self.corrections[correction] and correction in self.corrections_routines:
+                            self.log.debug(f"Adding {correction} correction.")
+                            corrections_to_apply.append(
+                                self.corrections_routines[correction](self.azimuth,
+                                                                      self.elevation))
+                else:
+                    self.log.debug("No information available about telescope azimuth and/or "
+                                   "elevation.")
+
+                # run corrections concurrently (and/or wait for the heartbeat
+                # interval)
+                await asyncio.gather(*corrections_to_apply)
+            except asyncio.CancelledError:
+                self.log.debug("Correction loop cancelled.")
+                break
+            except Exception as e:
+                self.log.exception(e)
+                self.evt_errorCode.set_put(errorCode=CORRECTION_LOOP_DIED,
+                                           errorReport="Correction loop died.",
+                                           traceback=traceback.format_exc())
+                self.fault()
+                break
 
     def assert_any_corrections(self, data):
-        """Check that at least one attribute of SALPY_ATAOS.ATAOS_command_disableCorrectionC
-        or SALPY_ATAOS.ATAOS_command_enableCorrectionC are set to True.
+        """Check that at least one attribute of
+        SALPY_ATAOS.ATAOS_command_disableCorrectionC or
+        SALPY_ATAOS.ATAOS_command_enableCorrectionC are set to True.
 
         Parameters
         ----------
-        data : SALPY_ATAOS.ATAOS_command_disableCorrectionC or SALPY_ATAOS.ATAOS_command_enableCorrectionC
+        data : SALPY_ATAOS.ATAOS_command_disableCorrectionC or
+               SALPY_ATAOS.ATAOS_command_enableCorrectionC
 
         Raises
         ------
@@ -301,8 +387,9 @@ class ATAOS(base_csc.BaseCsc):
 
         If `self.move_while_exposing = False` the method will check that
         the camera is not exposing. If it is exposing, return `False`.
-        Return `True` otherwise. To determine if the camera is exposing
-        or not it uses a callback to the ATCamera_logevent_shutterDetailedState.
+        Return `True` otherwise. To determine if the camera is exposing or not
+        it uses a callback to the ATCamera_logevent_shutterDetailedState.
+
         If the detailed state is CLOSED, it means it is ok to expose.
 
         Returns
@@ -323,17 +410,21 @@ class ATAOS(base_csc.BaseCsc):
 
         Parameters
         ----------
-        data : SALPY_ATAOS.ATAOS_command_disableCorrectionC or SALPY_ATAOS.ATAOS_command_enableCorrectionC
+        data : SALPY_ATAOS.ATAOS_command_disableCorrectionC or
+               SALPY_ATAOS.ATAOS_command_enableCorrectionC
         flag : bool
         """
         if data.moveWhileExposing:
             self.move_while_exposing = flag
-        # Note that ATAOS_command_disableCorrectionC and ATAOS_command_enableCorrectionC topics have
-        # different names for the attribute that acts on all axis. They could have the same name but I
-        # wanted to make sure it is clear that when someone uses ATAOS_command_disableCorrectionC.disableAll
-        # they really understand they are disabling all corrections and vice-versa. With the different names
-        # I'm forced to do the following getattr logic. Either that or check the type of the input. But I
-        # think this looks cleaner.
+        # Note that ATAOS_command_disableCorrectionC and
+        # ATAOS_command_enableCorrectionC topics have different names for the
+        # attribute that acts on all axis. They could have the same name but I
+        # wanted to make sure it is clear that when someone uses
+        # ATAOS_command_disableCorrectionC.disableAll they really understand
+        # they are disabling all corrections and vice-versa. With the
+        # different names I'm forced to do the following getattr logic.
+        # Either that or check the type of the input. But I think this looks
+        # cleaner.
         if getattr(data, "enableAll", False):
             for key in self.corrections:
                 self.corrections[key] = flag
@@ -363,8 +454,28 @@ class ATAOS(base_csc.BaseCsc):
         """
         self.camera_exposing = data.substate != ShutterState.CLOSED
 
-    async def set_pressure(self, mirror, azimuth, elevation):
+    async def set_pressure_m1(self, azimuth, elevation):
+        """Set pressure on m1.
+
+        Parameters
+        ----------
+        azimuth : float
+        elevation : float
         """
+        await self.set_pressure("m1", azimuth, elevation)
+
+    async def set_pressure_m2(self, azimuth, elevation):
+        """Set pressure on m2.
+
+        Parameters
+        ----------
+        azimuth : float
+        elevation : float
+        """
+        await self.set_pressure("m2", azimuth, elevation)
+
+    async def set_pressure(self, mirror, azimuth, elevation):
+        """Set pressure on specified mirror.
 
         Parameters
         ----------
@@ -416,36 +527,51 @@ class ATAOS(base_csc.BaseCsc):
             topic.substate = self.detailed_state
             detailed_state_attr.put(topic)
 
-    async def set_hexapod(self, azimuth, elevation):
-        """
+    async def set_focus(self, azimuth, elevation):
+        """Utility to set focus position.
 
         Parameters
         ----------
         azimuth
         elevation
         """
-        status_bit = DetailedState.HEXAPOD
+        await self.set_hexapod(azimuth, elevation, f'z')
+
+    async def set_hexapod(self, azimuth, elevation, axis=f'xyzuvw'):
+        """Utility to set hexapod position.
+
+        Parameters
+        ----------
+        azimuth
+        elevation
+        axis
+        """
 
         if self.can_move():
             # publish new detailed state
+
+            self.log.debug(f"Moving hexapod axis {axis}")
+
+            status_bit = DetailedState.HEXAPOD
+            cmd_attr = getattr(self.hexapod, f"cmd_moveToPosition")
+            evt_start_attr = getattr(self, f"evt_hexapodCorrectionStarted")
+            evt_end_attr = getattr(self, f"evt_hexapodCorrectionCompleted")
+
+            if axis == f"z":
+                status_bit = DetailedState.FOCUS
+                evt_start_attr = getattr(self, f"evt_focusCorrectionStarted")
+                evt_end_attr = getattr(self, f"evt_focusCorrectionCompleted")
+
             self.detailed_state = self.detailed_state ^ (1 << status_bit)
             detailed_state_attr = getattr(self, f"evt_detailedState")
             topic = detailed_state_attr.DataType()
             topic.substate = self.detailed_state
             detailed_state_attr.put(topic)
 
-            axis = f'xyzuvw'
-
-            cmd_attr = getattr(self.hexapod, f"cmd_moveToPosition")
-            evt_start_attr = getattr(self, f"evt_hexapodCorrectionStarted")
-            evt_end_attr = getattr(self, f"evt_hexapodCorrectionCompleted")
-
             cmd_topic = cmd_attr.DataType()
             (cmd_topic.x, cmd_topic.y, cmd_topic.z,
              cmd_topic.u, cmd_topic.v, cmd_topic.w) = self.model.get_correction_hexapod(azimuth,
                                                                                         elevation)
-
-            asyncio.sleep(0.)  # give control back to the event loop
 
             start_topic = evt_start_attr.DataType()
             start_topic.azimuth = azimuth
@@ -456,14 +582,34 @@ class ATAOS(base_csc.BaseCsc):
             end_topic.elevation = elevation
 
             for ax in axis:
-                setattr(start_topic, f'hexapod_{ax}', getattr(cmd_topic, ax))
-                setattr(end_topic, f'hexapod_{ax}', getattr(cmd_topic, ax))
+                if axis == f"z":
+                    setattr(start_topic, f'focus', getattr(cmd_topic, ax))
+                    setattr(end_topic, f'focus', getattr(cmd_topic, ax))
+                else:
+                    setattr(start_topic, f'hexapod_{ax}', getattr(cmd_topic, ax))
+                    setattr(end_topic, f'hexapod_{ax}', getattr(cmd_topic, ax))
 
             evt_start_attr.put(start_topic)
-            await cmd_attr.start(cmd_topic,
-                                 timeout=self.cmd_timeout)
-            evt_end_attr.put(end_topic)
-            # correction completed... flip bit on detailedState
-            self.detailed_state = self.detailed_state ^ (1 << status_bit)
-            topic.substate = self.detailed_state
-            detailed_state_attr.put(topic)
+            try:
+                await cmd_attr.start(cmd_topic,
+                                     timeout=self.cmd_timeout)
+            finally:
+                evt_end_attr.put(end_topic)
+                # correction completed... flip bit on detailedState
+                self.detailed_state = self.detailed_state ^ (1 << status_bit)
+                topic.substate = self.detailed_state
+                detailed_state_attr.put(topic)
+
+    def update_position_callback(self, id_data):
+        """Callback function to update the telescope position.
+
+        Parameters
+        ----------
+        id_data : SALPY_ATPtg.ATPtg_currentTargetStatus
+
+        """
+        # These values comes as +DD:MM:SS.SS strings from the pointing
+        # component. Need to parse them to floats here. Use
+        # astropy.coordinates.Angle to make the conversion.
+        self.azimuth = Angle(id_data.demandAz, u.deg).wrap_at(Angle(360, u.deg)).deg
+        self.elevation = Angle(id_data.demandEl, u.deg).deg
