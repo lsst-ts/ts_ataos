@@ -199,9 +199,9 @@ class TestCSC(unittest.TestCase):
             harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
             harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
 
-            # FIXME: Check if this is correct! Is there is a difference in
-            # command to move hexapod and focus
-            # or they will use the same command?
+            # FIXME: Check if this is correct! Is there a difference in
+            # command to move hexapod and focus or they will use the same
+            # command?
             harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=callback)
 
             # Add callback to events
@@ -251,7 +251,7 @@ class TestCSC(unittest.TestCase):
 
             if not get_tel_pos:
                 cmd_attr.set(azimuth=azimuth, elevation=elevation)
-                cmd_attr.start(timeout=timeout)
+                await cmd_attr.start(timeout=timeout)
             else:
                 await cmd_attr.start(timeout=timeout)
 
