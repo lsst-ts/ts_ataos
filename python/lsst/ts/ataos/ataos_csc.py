@@ -618,7 +618,7 @@ class ATAOS(base_csc.BaseCsc):
         self.azimuth = Angle(id_data.demandAz, u.deg).wrap_at(Angle(360, u.deg)).deg
         self.elevation = Angle(id_data.demandEl, u.deg).deg
 
-        def update_position_callback_mcs(self, id_data):
+    def update_position_callback_mcs(self, id_data):
         """Callback function to update the telescope position.
 
         Parameters
