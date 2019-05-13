@@ -166,7 +166,7 @@ class ATAOS(base_csc.BaseCsc):
             Command ID and data
         """
         self.ptg.tel_currentTargetStatus.callback = self.update_position_callback
-        self.mcs.evt_logevent_target.callback = self.update_position_callback_mcs
+        self.mcs.evt_target.callback = self.update_position_callback_mcs
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
 
     def end_disable(self, id_data):
@@ -181,7 +181,7 @@ class ATAOS(base_csc.BaseCsc):
             Command ID and data
         """
         self.ptg.tel_currentTargetStatus.callback = None
-        self.mcs.evt_logevent_target.callback = None
+        self.mcs.evt_target.callback = None
         if not self.correction_loop_task.done():
             self.correction_loop_task.cancel()
 
