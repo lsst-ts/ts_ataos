@@ -12,6 +12,7 @@ import SALPY_ATPtg
 import SALPY_ATPneumatics
 import SALPY_ATHexapod
 import SALPY_ATCamera
+import SALPY_ATMCS
 
 from lsst.ts.salobj import base_csc, Remote, State
 
@@ -85,6 +86,7 @@ class ATAOS(base_csc.BaseCsc):
 
         # Remotes
         self.ptg = Remote(SALPY_ATPtg, include=["currentTargetStatus"])
+        self.mcs = Remote(SALPY_ATMCS, include=["logevent_target"])
         self.pneumatics = Remote(SALPY_ATPneumatics, include=["m1SetPressure",
                                                               "m2SetPressure"])
         self.hexapod = Remote(SALPY_ATHexapod, include=["moveToPosition"])
@@ -164,6 +166,7 @@ class ATAOS(base_csc.BaseCsc):
             Command ID and data
         """
         self.ptg.tel_currentTargetStatus.callback = self.update_position_callback
+        self.mcs.evt_logevent_target = self.update_position_callback_mcs
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
 
     def end_disable(self, id_data):
@@ -178,6 +181,7 @@ class ATAOS(base_csc.BaseCsc):
             Command ID and data
         """
         self.ptg.tel_currentTargetStatus.callback = None
+        self.mcs.evt_logevent_target.callback = None
         if not self.correction_loop_task.done():
             self.correction_loop_task.cancel()
 
@@ -613,3 +617,14 @@ class ATAOS(base_csc.BaseCsc):
         # astropy.coordinates.Angle to make the conversion.
         self.azimuth = Angle(id_data.demandAz, u.deg).wrap_at(Angle(360, u.deg)).deg
         self.elevation = Angle(id_data.demandEl, u.deg).deg
+
+        def update_position_callback_mcs(self, id_data):
+        """Callback function to update the telescope position.
+
+        Parameters
+        ----------
+        id_data : SALPY_ATMCS.ATMCS_logevent_target
+
+        """
+        self.azimuth = id_data.azimuth
+        self.elevation = id_data.elevation
