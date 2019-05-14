@@ -4,8 +4,6 @@ from unittest.mock import Mock
 import asyncio
 import numpy as np
 import logging
-from astropy.coordinates import Angle
-import astropy.units as u
 
 from lsst.ts import salobj
 
