@@ -3,15 +3,13 @@ import asyncio
 import traceback
 import enum
 import numpy as np
-from astropy.coordinates import Angle
-import astropy.units as u
 
 import SALPY_ATAOS
 
-import SALPY_ATPtg
 import SALPY_ATPneumatics
 import SALPY_ATHexapod
 import SALPY_ATCamera
+import SALPY_ATMCS
 
 from lsst.ts.salobj import base_csc, Remote, State
 
@@ -84,7 +82,7 @@ class ATAOS(base_csc.BaseCsc):
         self.camera_exposing = False  # flag to monitor if camera is exposing
 
         # Remotes
-        self.ptg = Remote(SALPY_ATPtg, include=["currentTargetStatus"])
+        self.mcs = Remote(SALPY_ATMCS, include=["target"])
         self.pneumatics = Remote(SALPY_ATPneumatics, include=["m1SetPressure",
                                                               "m2SetPressure"])
         self.hexapod = Remote(SALPY_ATHexapod, include=["moveToPosition"])
@@ -163,7 +161,7 @@ class ATAOS(base_csc.BaseCsc):
         id_data : `CommandIdData`
             Command ID and data
         """
-        self.ptg.tel_currentTargetStatus.callback = self.update_position_callback
+        self.mcs.evt_target.callback = self.update_position_callback
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
 
     def end_disable(self, id_data):
@@ -177,7 +175,7 @@ class ATAOS(base_csc.BaseCsc):
         id_data : `CommandIdData`
             Command ID and data
         """
-        self.ptg.tel_currentTargetStatus.callback = None
+        self.mcs.evt_target.callback = None
         if not self.correction_loop_task.done():
             self.correction_loop_task.cancel()
 
@@ -605,11 +603,8 @@ class ATAOS(base_csc.BaseCsc):
 
         Parameters
         ----------
-        id_data : SALPY_ATPtg.ATPtg_currentTargetStatus
+        id_data : SALPY_ATMCS.ATMCS_logevent_target
 
         """
-        # These values comes as +DD:MM:SS.SS strings from the pointing
-        # component. Need to parse them to floats here. Use
-        # astropy.coordinates.Angle to make the conversion.
-        self.azimuth = Angle(id_data.demandAz, u.deg).wrap_at(Angle(360, u.deg)).deg
-        self.elevation = Angle(id_data.demandEl, u.deg).deg
+        self.azimuth = id_data.azimuth
+        self.elevation = id_data.elevation
