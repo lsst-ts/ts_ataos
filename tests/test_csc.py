@@ -13,7 +13,7 @@ from lsst.ts.ataos import ataos_csc
 
 import SALPY_ATAOS
 
-import SALPY_ATPtg
+import SALPY_ATMCS
 import SALPY_ATPneumatics
 import SALPY_ATHexapod
 import SALPY_ATCamera
@@ -35,7 +35,7 @@ class Harness:
         self.aos_remote = salobj.Remote(SALPY_ATAOS)
 
         # Adds Controllers to receive commands from the ATAOS system
-        self.atptg = salobj.Controller(SALPY_ATPtg)
+        self.atmcs = salobj.Controller(SALPY_ATMCS)
         self.pnematics = salobj.Controller(SALPY_ATPneumatics)
         self.hexapod = salobj.Controller(SALPY_ATHexapod)
         self.camera = salobj.Controller(SALPY_ATCamera)
@@ -221,19 +221,19 @@ class TestCSC(unittest.TestCase):
             coro_hx_end = harness.aos_remote.evt_hexapodCorrectionCompleted.next(flush=False,
                                                                                  timeout=timeout)
 
-            # Publish telescope position using atptg controller from harness
-            topic = harness.atptg.tel_currentTargetStatus.DataType()
+            # Publish telescope position using atmcs controller from harness
+            topic = harness.atmcs.evt_target.DataType()
 
             azimuth = np.random.uniform(0., 360.)
             # make sure it is never zero because np.random.uniform is [min, max)
             elevation = 90.-np.random.uniform(0., 90.)
 
-            topic.demandAz = Angle(azimuth, u.deg).to_string(unit=u.deg, sep=':')
-            topic.demandEl = Angle(elevation, u.deg).to_string(unit=u.deg, sep=':')
+            topic.azimuth = azimuth
+            topic.elevation = elevation
 
             async def publish_mountEnconders(topic, ntimes=5):
                 for i in range(ntimes):
-                    harness.atptg.tel_currentTargetStatus.put(topic)
+                    harness.atmcs.evt_target.put(topic)
                     await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
 
             await publish_mountEnconders(topic)

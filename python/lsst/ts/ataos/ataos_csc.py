@@ -3,8 +3,6 @@ import asyncio
 import traceback
 import enum
 import numpy as np
-from astropy.coordinates import Angle
-import astropy.units as u
 
 import SALPY_ATAOS
 
