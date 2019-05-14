@@ -291,13 +291,9 @@ class TestCSC(unittest.TestCase):
                     continue
 
                 with self.subTest(component=component, topic=topic):
-                    self.assertEqual(Angle(component.azimuth,
-                                           u.deg).to_string(unit=u.deg, sep=':'),
-                                     topic.demandAz)
+                    self.assertEqual(component.azimuth, topic.azimuth)
                 with self.subTest(component=component, topic=topic):
-                    self.assertEqual(Angle(component.elevation,
-                                           u.deg).to_string(unit=u.deg, sep=':'),
-                                     topic.demandEl)
+                    self.assertEqual(component.elevation, topic.elevation)
 
             self.assertEqual(len(harness.aos_remote.evt_detailedState.callback.call_args_list),
                              6 if not while_exposing else 4,
