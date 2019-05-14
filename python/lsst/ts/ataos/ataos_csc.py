@@ -86,7 +86,7 @@ class ATAOS(base_csc.BaseCsc):
 
         # Remotes
         self.ptg = Remote(SALPY_ATPtg, include=["currentTargetStatus"])
-        self.mcs = Remote(SALPY_ATMCS, include=["logevent_target"])
+        self.mcs = Remote(SALPY_ATMCS, include=["target"])
         self.pneumatics = Remote(SALPY_ATPneumatics, include=["m1SetPressure",
                                                               "m2SetPressure"])
         self.hexapod = Remote(SALPY_ATHexapod, include=["moveToPosition"])
