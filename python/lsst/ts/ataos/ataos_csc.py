@@ -2,6 +2,7 @@
 import asyncio
 import traceback
 import enum
+import pathlib
 import numpy as np
 
 import SALPY_ATAOS
@@ -11,7 +12,7 @@ import SALPY_ATHexapod
 import SALPY_ATCamera
 import SALPY_ATMCS
 
-from lsst.ts.salobj import base_csc, Remote, State
+from lsst.ts.salobj import base_csc, ConfigurableCsc, Remote, State
 
 from .model import Model
 
@@ -49,35 +50,36 @@ class DetailedState(enum.IntEnum):
     FOCUS = 1 << 4  # Focus correction running
 
 
-class ATAOS(base_csc.BaseCsc):
+class ATAOS(ConfigurableCsc):
     """
-    Commandable SAL Component (CSC) for the Auxiliary Telescope Active Optics System.
+    Configurable Commandable SAL Component (CSC) for the Auxiliary Telescope
+    Active Optics System.
     """
 
-    def __init__(self):
+    def __init__(self, config_dir=None, initial_state=State.STANDBY):
         """
         Initialize AT AOS CSC.
         """
-        self.model = Model()  # instantiate the model so I can have the settings once the component is up
+        schema_path = pathlib.Path(__file__).resolve().parents[4].joinpath("schema", "ATAOS.yaml")
 
-        super().__init__(SALPY_ATAOS)
+        super().__init__(SALPY_ATAOS, index=0,
+                         schema_path=schema_path,
+                         config_dir=config_dir,
+                         initial_state=initial_state,
+                         initial_simulation_mode=0)
+
+        self.model = Model()
 
         self._detailed_state = DetailedState.IDLE
 
-        # publish settingVersions
-        settingVersions_topic = self.evt_settingVersions.DataType()
-        settingVersions_topic.recommendedSettingsVersion = \
-            self.model.recommended_settings
-        settingVersions_topic.recommendedSettingsLabels = self.model.settings_labels
-
-        self.evt_settingVersions.put(settingVersions_topic)
-
         # how long to wait for the loops to die? = 5 heartbeats
         self.loop_die_timeout = 5.*base_csc.HEARTBEAT_INTERVAL
-        # regular timeout for commands to remotes = 5 heartbeats
+        # regular timeout for commands to remotes = 60 heartbeats (!?)
         self.cmd_timeout = 60.*base_csc.HEARTBEAT_INTERVAL
 
         self.correction_loop_task = None
+        # Time between corrections
+        self.correction_loop_time = base_csc.HEARTBEAT_INTERVAL
 
         self.camera_exposing = False  # flag to monitor if camera is exposing
 
@@ -150,7 +152,7 @@ class ATAOS(base_csc.BaseCsc):
         # self.evt_correctionEnabled.set(moveWhileExposing=bool(value))
         self._move_while_exposing = bool(value)
 
-    def end_enable(self, id_data):
+    async def end_enable(self, id_data):
         """End do_enable; called after state changes but before command
         acknowledged.
 
@@ -164,7 +166,7 @@ class ATAOS(base_csc.BaseCsc):
         self.mcs.evt_target.callback = self.update_position_callback
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
 
-    def end_disable(self, id_data):
+    async def end_disable(self, id_data):
         """End do_disable; called after state changes but before command
         acknowledged.
 
@@ -608,3 +610,27 @@ class ATAOS(base_csc.BaseCsc):
         """
         self.azimuth = id_data.azimuth
         self.elevation = id_data.elevation
+
+    @staticmethod
+    def get_config_pkg():
+        return "ts_config_attcs"
+
+    async def configure(self, config):
+        """Implement method to configure the CSC.
+
+        Parameters
+        ----------
+        config : `object`
+            The configuration as described by the schema at ``schema_path``,
+            as a struct-like object.
+        Notes
+        -----
+        Called when running the ``start`` command, just before changing
+        summary state from `State.STANDBY` to `State.DISABLED`.
+
+        """
+
+        self.correction_loop_time = 1./config.correction_frequency
+
+        for key in self.model.config:
+            self.model.config[key] = getattr(config, key)
