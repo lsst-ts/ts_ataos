@@ -1,69 +1,80 @@
 
+import numpy as np
+from numpy.polynomial.polynomial import polyval
+
 __all__ = ['Model']
 
 
 class Model:
+    """ A model class to that handles the ATAOS application level code. This
+    class implements the corrections for each of the axis on the AT telescope,
+    e.g. M1 and M2 pressure and hexapod correction.
 
-    @property
-    def recommended_settings(self):
-        """Recommended settings property.
+    The AOS corrections are simple polynomes where x is the gravity vector,
+    cos(theta), where theta is the azimuth distance or 90.-altitude.
 
-        Returns
-        -------
-        recommended_settings : str
-            Recommended settings read from Model configuration file.
-        """
-        return 'default'  # FIXME: Read from config file
+    """
+    def __init__(self):
+        self.config = {'m1': [0.0],
+                       'm2': [0.0],
+                       'hexapod_x': [0.0],
+                       'hexapod_y': [0.0],
+                       'hexapod_z': [0.0],
+                       'hexapod_u': [0.0],
+                       'hexapod_v': [0.0]
+                       }
 
-    @property
-    def settings_labels(self):
-        """Recommended settings labels.
-
-        Returns
-        -------
-        recommended_settings_labels : str
-            Recommended settings labels read from Model configuration file.
-
-        """
-        return 'default,option1,test'  # FIXME: Read from config file
-
-    def get_correction_m1(self, azimuth, elevation):
-        """
+    def get_correction_m1(self, azimuth, elevation, temperature=None):
+        """Correction for m1 support pressure.
 
         Parameters
         ----------
-        azimuth
-        elevation
+        azimuth : `float`
+            Azimuth position for the correction (degrees).
+        elevation : `float`
+            Elevation position for correction (degrees). Currently ignored.
+        temperature : `float`
+            Temperature for correction (C). Currently ignored.
 
         Returns
         -------
         pressure : float
             Pressure to apply (Pascal).
         """
-        return 0.
+        return polyval(np.cos(np.radians(90. - elevation)),
+                       self.config['m1'])
 
-    def get_correction_m2(self, azimuth, elevation):
-        """
+    def get_correction_m2(self, azimuth, elevation, temperature=None):
+        """Correction for m2 support pressure.
 
         Parameters
         ----------
-        azimuth
-        elevation
+        azimuth : `float`
+            Azimuth position for the correction (degrees).
+        elevation : `float`
+            Elevation position for correction (degrees). Currently ignored.
+        temperature : `float`
+            Temperature for correction (C). Currently ignored.
 
         Returns
         -------
         pressure : float
             Pressure to apply (Pascal).
         """
-        return 0.
+        return polyval(np.cos(np.radians(90. - elevation)),
+                       self.config['m2'])
 
-    def get_correction_hexapod(self, azimuth, elevation):
-        """
+    def get_correction_hexapod(self, azimuth, elevation, temperature=None):
+        """Correction for hexapod position.
 
         Parameters
         ----------
-        azimuth
-        elevation
+        azimuth : `float`
+            Azimuth position for the correction (degrees).
+        elevation : `float`
+            Elevation position for correction (degrees). Currently ignored.
+        temperature : `float`
+            Temperature for correction (C). Currently ignored.
 
         Returns
         -------
@@ -80,4 +91,16 @@ class Model:
         w : float
             rotation angle with respect to z-axis (degrees)
         """
-        return 0., 0., 0., 0., 0., 0.
+        x = polyval(np.cos(np.radians(90. - elevation)),
+                    self.config['hexapod_x'])
+        y = polyval(np.cos(np.radians(90. - elevation)),
+                    self.config['hexapod_y'])
+        z = polyval(np.cos(np.radians(90. - elevation)),
+                    self.config['hexapod_z'])
+        u = polyval(np.cos(np.radians(90. - elevation)),
+                    self.config['hexapod_u'])
+        v = polyval(np.cos(np.radians(90. - elevation)),
+                    self.config['hexapod_v'])
+        w = 0.
+
+        return x, y, z, u, v, w
