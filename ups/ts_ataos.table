@@ -5,6 +5,7 @@
 # - Any package whose API is used should be listed explicitly
 #   rather than assuming it will be included recursively.
 setupRequired(ts_salobj)
+setupRequired(ts_config_attcs)
 
 # The following is boilerplate for all packages.
 # See https://dmtn-001.lsst.io for details on LSST_LIBRARY_PATH.
