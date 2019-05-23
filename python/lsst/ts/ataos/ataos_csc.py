@@ -114,9 +114,11 @@ class ATAOS(base_csc.BaseCsc):
 
         self._move_while_exposing = False
 
+        self.log.debug("Done")
+
     @property
     def detailed_state(self):
-        """
+        """Return the current value for detailed state.
 
         Returns
         -------
@@ -127,13 +129,15 @@ class ATAOS(base_csc.BaseCsc):
 
     @detailed_state.setter
     def detailed_state(self, value):
-        """
+        """Set and publish current value for detailed state.
 
         Parameters
         ----------
-        value
+        value : `int`
+            New detailed state. Will be converted to np.uint8
         """
         self._detailed_state = np.uint8(value)
+        self.evt_detailedState.set_put(substate=self._detailed_state)
 
     @property
     def move_while_exposing(self):
@@ -161,6 +165,8 @@ class ATAOS(base_csc.BaseCsc):
         id_data : `CommandIdData`
             Command ID and data
         """
+        # Flush event queue to make sure only current values are accounted for!
+        self.mcs.evt_target.flush()
         self.mcs.evt_target.callback = self.update_position_callback
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
 
@@ -175,14 +181,16 @@ class ATAOS(base_csc.BaseCsc):
         id_data : `CommandIdData`
             Command ID and data
         """
+
         self.mcs.evt_target.callback = None
         if not self.correction_loop_task.done():
             self.correction_loop_task.cancel()
 
-        self.correction_loop_task = None
         disable = self.cmd_disableCorrection.DataType()
         disable.disableAll = True
         self.mark_corrections(disable, False)
+
+        self.detailed_state = 0
 
     async def do_applyCorrection(self, id_data):
         """Apply correction on all components either for the current position
@@ -485,16 +493,12 @@ class ATAOS(base_csc.BaseCsc):
         status_bit = getattr(DetailedState, f"{mirror}".upper())
 
         # Check that pressure is not being applied yet
-        if self.detailed_state & (1 << status_bit) != 0:
+        if self.detailed_state & status_bit != 0:
             self.log.warning("%s pressure correction running... skipping...", mirror)
             return
         else:
             # publish new detailed state
-            self.detailed_state = self.detailed_state ^ (1 << status_bit)
-            detailed_state_attr = getattr(self, f"evt_detailedState")
-            topic = detailed_state_attr.DataType()
-            topic.substate = self.detailed_state
-            detailed_state_attr.put(topic)
+            self.detailed_state = self.detailed_state ^ status_bit
 
             cmd_attr = getattr(self.pneumatics, f"cmd_{mirror}SetPressure")
             evt_start_attr = getattr(self, f"evt_{mirror}CorrectionStarted")
@@ -517,13 +521,17 @@ class ATAOS(base_csc.BaseCsc):
             end_topic.pressure = cmd_topic.pressure
 
             evt_start_attr.put(start_topic)
-            await cmd_attr.start(cmd_topic,
-                                 timeout=self.cmd_timeout)
-            evt_end_attr.put(end_topic)
-            # correction completed... flip bit on detailedState
-            self.detailed_state = self.detailed_state ^ (1 << status_bit)
-            topic.substate = self.detailed_state
-            detailed_state_attr.put(topic)
+            try:
+                await cmd_attr.start(cmd_topic,
+                                     timeout=self.cmd_timeout)
+            except Exception as e:
+                self.log.warning(f"Failed to set pressure for {mirror} @ "
+                                 f"AzEl: {azimuth}/{elevation}")
+                self.log.exception(e)
+            finally:
+                evt_end_attr.put(end_topic)
+                # correction completed... flip bit on detailedState
+                self.detailed_state = self.detailed_state ^ status_bit
 
     async def set_focus(self, azimuth, elevation):
         """Utility to set focus position.
@@ -560,11 +568,7 @@ class ATAOS(base_csc.BaseCsc):
                 evt_start_attr = getattr(self, f"evt_focusCorrectionStarted")
                 evt_end_attr = getattr(self, f"evt_focusCorrectionCompleted")
 
-            self.detailed_state = self.detailed_state ^ (1 << status_bit)
-            detailed_state_attr = getattr(self, f"evt_detailedState")
-            topic = detailed_state_attr.DataType()
-            topic.substate = self.detailed_state
-            detailed_state_attr.put(topic)
+            self.detailed_state = self.detailed_state ^ status_bit
 
             cmd_topic = cmd_attr.DataType()
             (cmd_topic.x, cmd_topic.y, cmd_topic.z,
@@ -591,12 +595,14 @@ class ATAOS(base_csc.BaseCsc):
             try:
                 await cmd_attr.start(cmd_topic,
                                      timeout=self.cmd_timeout)
+            except Exception as e:
+                self.log.warning(f"Failed to set hexapod position @ "
+                                 f"AzEl: {azimuth}/{elevation}")
+                self.log.exception(e)
             finally:
                 evt_end_attr.put(end_topic)
                 # correction completed... flip bit on detailedState
-                self.detailed_state = self.detailed_state ^ (1 << status_bit)
-                topic.substate = self.detailed_state
-                detailed_state_attr.put(topic)
+                self.detailed_state = self.detailed_state ^ status_bit
 
     def update_position_callback(self, id_data):
         """Callback function to update the telescope position.
