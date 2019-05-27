@@ -347,10 +347,9 @@ class ATAOS(ConfigurableCsc):
                 break
             except Exception as e:
                 self.log.exception(e)
-                self.evt_errorCode.set_put(errorCode=CORRECTION_LOOP_DIED,
-                                           errorReport="Correction loop died.",
-                                           traceback=traceback.format_exc())
-                self.fault()
+                self.fault(code=CORRECTION_LOOP_DIED,
+                           report="Correction loop died.",
+                           traceback=traceback.format_exc())
                 break
 
     def assert_any_corrections(self, data):
@@ -536,6 +535,7 @@ class ATAOS(ConfigurableCsc):
                 self.log.warning(f"Failed to set pressure for {mirror} @ "
                                  f"AzEl: {azimuth}/{elevation}")
                 self.log.exception(e)
+                raise e
             finally:
                 evt_end_attr.put(end_topic)
                 # correction completed... flip bit on detailedState
@@ -607,6 +607,7 @@ class ATAOS(ConfigurableCsc):
                 self.log.warning(f"Failed to set hexapod position @ "
                                  f"AzEl: {azimuth}/{elevation}")
                 self.log.exception(e)
+                raise e
             finally:
                 evt_end_attr.put(end_topic)
                 # correction completed... flip bit on detailedState
@@ -646,3 +647,29 @@ class ATAOS(ConfigurableCsc):
 
         for key in self.model.config:
             self.model.config[key] = getattr(config, key)
+
+    def fault(self, code=None, report="", traceback=""):
+        """Enter the fault state.
+
+        Subclass parent method to disable corrections in the wait to FAULT
+        state.
+
+        Parameters
+        ----------
+        code : `int` (optional)
+            Error code for the ``errorCode`` event; if None then ``errorCode``
+            is not output and you should output it yourself.
+        report : `str` (optional)
+            Description of the error.
+        traceback : `str` (optional)
+            Description of the traceback, if any.
+        """
+
+        # Disable corrections
+        disable_corr = self.cmd_disableCorrection.DataType()
+        disable_corr.disableAll = True
+        self.mark_corrections(disable_corr, False)
+
+        self.publish_enable_corrections()
+
+        super().fault(code=code, report=report, traceback=traceback)
