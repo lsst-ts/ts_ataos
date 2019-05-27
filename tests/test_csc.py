@@ -184,6 +184,9 @@ class TestCSC(unittest.TestCase):
             def callback(data):
                 pass
 
+            def hexapod_move_callback(data):
+                harness.hexapod.evt_positionUpdate.put()
+
             # Add callback to commands from pneumatics and hexapod
             harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
             harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
@@ -191,7 +194,7 @@ class TestCSC(unittest.TestCase):
             # FIXME: Check if this is correct! Is there a difference in
             # command to move hexapod and focus or they will use the same
             # command?
-            harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=callback)
+            harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=hexapod_move_callback)
 
             # Add callback to events
             harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)

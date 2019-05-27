@@ -87,7 +87,7 @@ class ATAOS(ConfigurableCsc):
         self.mcs = Remote(SALPY_ATMCS, include=["target"])
         self.pneumatics = Remote(SALPY_ATPneumatics, include=["m1SetPressure",
                                                               "m2SetPressure"])
-        self.hexapod = Remote(SALPY_ATHexapod, include=["moveToPosition"])
+        self.hexapod = Remote(SALPY_ATHexapod, include=["moveToPosition", "positionUpdate"])
         self.camera = Remote(SALPY_ATCamera, include=["shutterDetailedState"])
 
         self.azimuth = None
@@ -327,7 +327,7 @@ class ATAOS(ConfigurableCsc):
 
                 # The heartbeat wait is folded here so instead of applying and
                 # then waiting, the loop applies and wait at the same time.
-                corrections_to_apply = [asyncio.sleep(base_csc.HEARTBEAT_INTERVAL)]
+                corrections_to_apply = []
                 if self.azimuth is not None and self.elevation is not None:
                     for correction in self.corrections:
                         if self.corrections[correction] and correction in self.corrections_routines:
@@ -341,11 +341,16 @@ class ATAOS(ConfigurableCsc):
 
                 # run corrections concurrently (and/or wait for the heartbeat
                 # interval)
-                await asyncio.gather(*corrections_to_apply)
+                if len(corrections_to_apply) > 0:
+                    await asyncio.gather(*corrections_to_apply)
+
+                await asyncio.sleep(self.correction_loop_time)
+
             except asyncio.CancelledError:
                 self.log.debug("Correction loop cancelled.")
                 break
             except Exception as e:
+                self.log.error("Error in correction loop. Going to FAULT state.")
                 self.log.exception(e)
                 self.evt_errorCode.set_put(errorCode=CORRECTION_LOOP_DIED,
                                            errorReport="Correction loop died.",
@@ -536,6 +541,7 @@ class ATAOS(ConfigurableCsc):
                 self.log.warning(f"Failed to set pressure for {mirror} @ "
                                  f"AzEl: {azimuth}/{elevation}")
                 self.log.exception(e)
+                raise e
             finally:
                 evt_end_attr.put(end_topic)
                 # correction completed... flip bit on detailedState
@@ -601,12 +607,15 @@ class ATAOS(ConfigurableCsc):
 
             evt_start_attr.put(start_topic)
             try:
+                coro = self.hexapod.evt_positionUpdate.next(flush=True, timeout=self.cmd_timeout)
                 await cmd_attr.start(cmd_topic,
                                      timeout=self.cmd_timeout)
+                await coro
             except Exception as e:
                 self.log.warning(f"Failed to set hexapod position @ "
                                  f"AzEl: {azimuth}/{elevation}")
                 self.log.exception(e)
+                raise e
             finally:
                 evt_end_attr.put(end_topic)
                 # correction completed... flip bit on detailedState
@@ -646,3 +655,28 @@ class ATAOS(ConfigurableCsc):
 
         for key in self.model.config:
             self.model.config[key] = getattr(config, key)
+
+    def fault(self, code=None, report=""):
+        """Enter the fault state.
+
+        Subclass parent method to disable corrections in the wait to FAULT
+        state.
+
+        Parameters
+        ----------
+        code : `int` (optional)
+            Error code for the ``errorCode`` event; if None then ``errorCode``
+            is not output and you should output it yourself.
+        report : `str` (optional)
+            Description of the error.
+        """
+
+        # Disable corrections
+        self.mcs.evt_target.callback = None
+        disable_corr = self.cmd_disableCorrection.DataType()
+        disable_corr.disableAll = True
+        self.mark_corrections(disable_corr, False)
+
+        self.publish_enable_corrections()
+
+        super().fault(code=code, report=report)
