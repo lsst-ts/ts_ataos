@@ -242,11 +242,17 @@ class ATAOS(ConfigurableCsc):
             azimuth = self.azimuth
             elevation = self.elevation
 
+        await self.set_hexapod(azimuth, elevation)
+        await self.set_pressure("m1", azimuth, elevation)
+        await self.set_pressure("m2", azimuth, elevation)
+
+        # FIXME: THIS is not working with the current version of the software
+        # need to see what is the problem. 2019/June/04
         # run corrections concurrently
-        await asyncio.gather(self.set_hexapod(azimuth, elevation),
-                             self.set_pressure("m1", azimuth, elevation),
-                             self.set_pressure("m2", azimuth, elevation),
-                             )  # FIXME: What about focus? YES, do focus separately
+        # await asyncio.gather(self.set_hexapod(azimuth, elevation),
+        #                      self.set_pressure("m1", azimuth, elevation),
+        #                      self.set_pressure("m2", azimuth, elevation),
+        #                      )  # FIXME: What about focus? YES, do focus separately
 
     async def do_applyFocusOffset(self, id_data):
         """Adds a focus offset to the focus correction. Same as apply focus
@@ -339,12 +345,19 @@ class ATAOS(ConfigurableCsc):
                     self.log.debug("No information available about telescope azimuth and/or "
                                    "elevation.")
 
+                # FIXME:
+                # Run corrections in series because CSCs are not supporting
+                # concurrent operations yet 2019/June/4
+                corrections_to_apply.append(asyncio.sleep(self.correction_loop_time))
+                for corr in corrections_to_apply:
+                    await corr
+
                 # run corrections concurrently (and/or wait for the heartbeat
                 # interval)
-                if len(corrections_to_apply) > 0:
-                    await asyncio.gather(*corrections_to_apply)
+                # if len(corrections_to_apply) > 0:
+                #     await asyncio.gather(*corrections_to_apply)
 
-                await asyncio.sleep(self.correction_loop_time)
+                # await asyncio.sleep(self.correction_loop_time)
 
             except asyncio.CancelledError:
                 self.log.debug("Correction loop cancelled.")
