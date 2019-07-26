@@ -162,6 +162,32 @@ class TestCSC(unittest.TestCase):
 
         async def doit(get_tel_pos=True, while_exposing=False):
             harness = Harness()
+
+            #
+            # Check applyCorrection for position
+            #
+            def callback(data):
+                pass
+
+            def hexapod_move_callback(data):
+                harness.hexapod.evt_positionUpdate.put()
+
+            # Add callback to commands from pneumatics and hexapod
+            harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m1OpenAirValve.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m2OpenAirValve.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m1CloseAirValve.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m2CloseAirValve.callback = Mock(wraps=callback)
+
+            # FIXME: Check if this is correct! Is there a difference in
+            # command to move hexapod and focus or they will use the same
+            # command?
+            harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=hexapod_move_callback)
+
+            # Add callback to events
+            harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
+
             timeout = 5 * salobj.base_csc.HEARTBEAT_INTERVAL
             # Enable the CSC
             await harness.enable_csc()
@@ -178,27 +204,6 @@ class TestCSC(unittest.TestCase):
             harness.aos_remote.cmd_disableCorrection.set(disableAll=True)
             await harness.aos_remote.cmd_disableCorrection.start(timeout=timeout)
 
-            #
-            # Check applyCorrection for position
-            #
-            def callback(data):
-                pass
-
-            def hexapod_move_callback(data):
-                harness.hexapod.evt_positionUpdate.put()
-
-            # Add callback to commands from pneumatics and hexapod
-            harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
-            harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
-
-            # FIXME: Check if this is correct! Is there a difference in
-            # command to move hexapod and focus or they will use the same
-            # command?
-            harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=hexapod_move_callback)
-
-            # Add callback to events
-            harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
-
             coro_m1_start = harness.aos_remote.evt_m1CorrectionStarted.next(flush=False,
                                                                             timeout=timeout)
             coro_m2_start = harness.aos_remote.evt_m2CorrectionStarted.next(flush=False,
@@ -214,18 +219,18 @@ class TestCSC(unittest.TestCase):
                                                                                  timeout=timeout)
 
             # Publish telescope position using atmcs controller from harness
-            topic = harness.atmcs.evt_target.DataType()
+            topic = harness.atmcs.tel_mountEncoders.DataType()
 
             azimuth = np.random.uniform(0., 360.)
             # make sure it is never zero because np.random.uniform is [min, max)
             elevation = 90.-np.random.uniform(0., 90.)
 
-            topic.azimuth = azimuth
-            topic.elevation = elevation
+            topic.azimuthCalculatedAngle = azimuth
+            topic.elevationCalculatedAngle = elevation
 
             async def publish_mountEnconders(topic, ntimes=5):
                 for i in range(ntimes):
-                    harness.atmcs.evt_target.put(topic)
+                    harness.atmcs.tel_mountEncoders.put(topic)
                     await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
 
             await publish_mountEnconders(topic)
@@ -283,9 +288,9 @@ class TestCSC(unittest.TestCase):
                     continue
 
                 with self.subTest(component=component, topic=topic):
-                    self.assertEqual(component.azimuth, topic.azimuth)
+                    self.assertEqual(component.azimuth, topic.azimuthCalculatedAngle)
                 with self.subTest(component=component, topic=topic):
-                    self.assertEqual(component.elevation, topic.elevation)
+                    self.assertEqual(component.elevation, topic.elevationCalculatedAngle)
 
             self.assertEqual(len(harness.aos_remote.evt_detailedState.callback.call_args_list),
                              6 if not while_exposing else 4,
@@ -318,6 +323,16 @@ class TestCSC(unittest.TestCase):
             await harness.enable_csc()
             self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
+            def callback(data):
+                pass
+
+            harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m1OpenAirValve.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m2OpenAirValve.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m1CloseAirValve.callback = Mock(wraps=callback)
+            harness.pnematics.cmd_m2CloseAirValve.callback = Mock(wraps=callback)
+
             cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
             # id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=5*salobj.base_csc.HEARTBEAT_INTERVAL)
 
@@ -348,6 +363,13 @@ class TestCSC(unittest.TestCase):
                 logger.debug(f"TEST 1: {corr}")
                 receive_topic = await coro
                 logger.debug(f"TEST 2: {corr}")
+                if corr == "m1":
+                    harness.pnematics.cmd_m1SetPressure.callback.assert_called()
+                    harness.pnematics.cmd_m1OpenAirValve.callback.assert_called()
+                elif corr == "m2":
+                    harness.pnematics.cmd_m2SetPressure.callback.assert_called()
+                    harness.pnematics.cmd_m2OpenAirValve.callback.assert_called()
+
                 for test_corr in corrections:
                     with self.subTest(test_corr=test_corr):
                         self.assertEqual(getattr(receive_topic, test_corr),
