@@ -5,13 +5,6 @@ import enum
 import pathlib
 import numpy as np
 
-import SALPY_ATAOS
-
-import SALPY_ATPneumatics
-import SALPY_ATHexapod
-import SALPY_ATCamera
-import SALPY_ATMCS
-
 from lsst.ts.salobj import base_csc, ConfigurableCsc, Remote, State
 
 from .model import Model
@@ -62,7 +55,7 @@ class ATAOS(ConfigurableCsc):
         """
         schema_path = pathlib.Path(__file__).resolve().parents[4].joinpath("schema", "ATAOS.yaml")
 
-        super().__init__(SALPY_ATAOS, index=0,
+        super().__init__("ATAOS", index=0,
                          schema_path=schema_path,
                          config_dir=config_dir,
                          initial_state=initial_state,
@@ -84,15 +77,15 @@ class ATAOS(ConfigurableCsc):
         self.camera_exposing = False  # flag to monitor if camera is exposing
 
         # Remotes
-        self.mcs = Remote(SALPY_ATMCS, include=["target", "mountEncoders"])
-        self.pneumatics = Remote(SALPY_ATPneumatics, include=["m1SetPressure",
-                                                              "m2SetPressure",
-                                                              "m1OpenAirValve",
-                                                              "m2OpenAirValve",
-                                                              "m1CloseAirValve",
-                                                              "m2CloseAirValve"])
-        self.hexapod = Remote(SALPY_ATHexapod, include=["moveToPosition", "positionUpdate"])
-        self.camera = Remote(SALPY_ATCamera, include=["shutterDetailedState"])
+        self.mcs = Remote(self.domain, "ATMCS", include=["target", "mountEncoders"])
+        self.pneumatics = Remote(self.domain, "ATPneumatics", include=["m1SetPressure",
+                                                                       "m2SetPressure",
+                                                                       "m1OpenAirValve",
+                                                                       "m2OpenAirValve",
+                                                                       "m1CloseAirValve",
+                                                                       "m2CloseAirValve"])
+        self.hexapod = Remote(self.domain, "ATHexapod", include=["moveToPosition", "positionUpdate"])
+        self.camera = Remote(self.domain, "ATCamera", include=["shutterDetailedState"])
 
         self.target_azimuth = None
         self.target_elevation = None
@@ -245,8 +238,8 @@ class ATAOS(ConfigurableCsc):
         self.assert_corrections(enabled=False)
 
         # FIXME: Get position from telescope if elevation = 0.
-        azimuth = id_data.data.azimuth % 360.
-        elevation = id_data.data.elevation
+        azimuth = id_data.azimuth % 360.
+        elevation = id_data.elevation
 
         if elevation == 0.:
             if self.azimuth is None or self.elevation is None:
@@ -287,7 +280,7 @@ class ATAOS(ConfigurableCsc):
 
         Components set to False in this command won't cause any affect, e.g.
         if m1 correction is enabled and `enable_correction` receives
-        `id_data.data.m1=False`, the correction will still be enabled
+        `id_data.m1=False`, the correction will still be enabled
         afterwards. To disable a correction (or `move_while_exposing`) use
         `do_disableCorrection()`.
 
@@ -297,11 +290,11 @@ class ATAOS(ConfigurableCsc):
             Command ID and data.
         """
         self.assert_enabled('enableCorrection')
-        self.assert_any_corrections(id_data.data)
-        asyncio.sleep(0.)  # give control back to event loop
+        self.assert_any_corrections(id_data)
+        await asyncio.sleep(0.)  # give control back to event loop
 
         try:
-            if id_data.data.m1 or id_data.data.enableAll:
+            if id_data.m1 or id_data.enableAll:
                 # Setting m1 pressure to zero and open valve before starting
                 self.pneumatics.cmd_m1SetPressure.set(pressure=0.)
                 await self.pneumatics.cmd_m1SetPressure.start(timeout=self.cmd_timeout)
@@ -312,7 +305,7 @@ class ATAOS(ConfigurableCsc):
             raise e
 
         try:
-            if id_data.data.m2 or id_data.data.enableAll:
+            if id_data.m2 or id_data.enableAll:
                 # Setting m1 pressure to zero and open valve before starting
                 self.pneumatics.cmd_m2SetPressure.set(pressure=0.)
                 await self.pneumatics.cmd_m2SetPressure.start(timeout=self.cmd_timeout)
@@ -322,8 +315,8 @@ class ATAOS(ConfigurableCsc):
             self.log.exception(e)
             raise e
 
-        self.mark_corrections(id_data.data, True)
-        asyncio.sleep(0.)  # give control back to event loop
+        self.mark_corrections(id_data, True)
+        await asyncio.sleep(0.)  # give control back to event loop
         self.publish_enable_corrections()
 
     async def do_disableCorrection(self, id_data):
@@ -338,11 +331,11 @@ class ATAOS(ConfigurableCsc):
             Command ID and data
         """
         self.assert_enabled('disableCorrection')
-        self.assert_any_corrections(id_data.data)
-        asyncio.sleep(0.)  # give control back to event loop
+        self.assert_any_corrections(id_data)
+        await asyncio.sleep(0.)  # give control back to event loop
 
         try:
-            if id_data.data.m1 or id_data.data.disableAll:
+            if id_data.m1 or id_data.disableAll:
                 # Setting m1 pressure to zero and open valve before starting
                 self.pneumatics.cmd_m1SetPressure.set(pressure=0.)
                 await self.pneumatics.cmd_m1SetPressure.start(timeout=self.cmd_timeout)
@@ -352,7 +345,7 @@ class ATAOS(ConfigurableCsc):
             self.log.exception(e)
 
         try:
-            if id_data.data.m2 or id_data.data.disableAll:
+            if id_data.m2 or id_data.disableAll:
                 # Setting m1 pressure to zero and open valve before starting
                 self.pneumatics.cmd_m2SetPressure.set(pressure=0.)
                 await self.pneumatics.cmd_m2SetPressure.start(timeout=self.cmd_timeout)
@@ -361,8 +354,8 @@ class ATAOS(ConfigurableCsc):
             self.log.error("Failed to close m2 air valve.")
             self.log.exception(e)
 
-        self.mark_corrections(id_data.data, False)
-        asyncio.sleep(0.)  # give control back to event loop
+        self.mark_corrections(id_data, False)
+        await asyncio.sleep(0.)  # give control back to event loop
         self.publish_enable_corrections()
 
     async def do_setFocus(self, id_data):
@@ -603,7 +596,7 @@ class ATAOS(ConfigurableCsc):
             cmd_topic.pressure = getattr(self.model, f"get_correction_{mirror}")(azimuth,
                                                                                  elevation)
 
-            asyncio.sleep(0.)  # give control back to the event loop
+            await asyncio.sleep(0.)  # give control back to the event loop
 
             start_topic = evt_start_attr.DataType()
             start_topic.azimuth = azimuth
