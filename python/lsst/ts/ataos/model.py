@@ -1,6 +1,5 @@
 
 import numpy as np
-from numpy.polynomial.polynomial import polyval
 
 __all__ = ['Model']
 
@@ -24,6 +23,14 @@ class Model:
                        'hexapod_v': [0.0]
                        }
 
+        self.poly_m1 = np.poly1d(self.config['m1'])
+        self.poly_m2 = np.poly1d(self.config['m2'])
+        self.poly_x = np.poly1d(self.config['hexapod_x'])
+        self.poly_y = np.poly1d(self.config['hexapod_y'])
+        self.poly_z = np.poly1d(self.config['hexapod_z'])
+        self.poly_u = np.poly1d(self.config['hexapod_u'])
+        self.poly_v = np.poly1d(self.config['hexapod_v'])
+
     def get_correction_m1(self, azimuth, elevation, temperature=None):
         """Correction for m1 support pressure.
 
@@ -41,8 +48,7 @@ class Model:
         pressure : float
             Pressure to apply (Pascal).
         """
-        return polyval(np.cos(np.radians(90. - elevation)),
-                       self.config['m1'])
+        return self.poly_m1(np.cos(np.radians(90. - elevation)))
 
     def get_correction_m2(self, azimuth, elevation, temperature=None):
         """Correction for m2 support pressure.
@@ -61,8 +67,7 @@ class Model:
         pressure : float
             Pressure to apply (Pascal).
         """
-        return polyval(np.cos(np.radians(90. - elevation)),
-                       self.config['m2'])
+        return self.poly_m2(np.cos(np.radians(90. - elevation)))
 
     def get_correction_hexapod(self, azimuth, elevation, temperature=None):
         """Correction for hexapod position.
@@ -91,16 +96,74 @@ class Model:
         w : float
             rotation angle with respect to z-axis (degrees)
         """
-        x = polyval(np.cos(np.radians(90. - elevation)),
-                    self.config['hexapod_x'])
-        y = polyval(np.cos(np.radians(90. - elevation)),
-                    self.config['hexapod_y'])
-        z = polyval(np.cos(np.radians(90. - elevation)),
-                    self.config['hexapod_z'])
-        u = polyval(np.cos(np.radians(90. - elevation)),
-                    self.config['hexapod_u'])
-        v = polyval(np.cos(np.radians(90. - elevation)),
-                    self.config['hexapod_v'])
+        x = self.poly_x(np.cos(np.radians(90. - elevation)))
+        y = self.poly_y(np.cos(np.radians(90. - elevation)))
+        z = self.poly_z(np.cos(np.radians(90. - elevation)))
+        u = self.poly_u(np.cos(np.radians(90. - elevation)))
+        v = self.poly_v(np.cos(np.radians(90. - elevation)))
         w = 0.
 
         return x, y, z, u, v, w
+
+    @property
+    def m1(self):
+        return self.config['m1']
+
+    @m1.setter
+    def m1(self, val):
+        self.config['m1'] = val
+        self.poly_m1 = np.poly1d(val)
+
+    @property
+    def m2(self):
+        return self.config['m2']
+
+    @m2.setter
+    def m2(self, val):
+        self.config['m2'] = val
+        self.poly_m2 = np.poly1d(val)
+
+    @property
+    def hexapod_x(self):
+        return self.config['hexapod_x']
+
+    @hexapod_x.setter
+    def hexapod_x(self, val):
+        self.config['hexapod_x'] = val
+        self.poly_x = np.poly1d(val)
+
+    @property
+    def hexapod_y(self):
+        return self.config['hexapod_y']
+
+    @hexapod_y.setter
+    def hexapod_y(self, val):
+        self.config['hexapod_y'] = val
+        self.poly_y = np.poly1d(val)
+
+    @property
+    def hexapod_z(self):
+        return self.config['hexapod_z']
+
+    @hexapod_z.setter
+    def hexapod_z(self, val):
+        self.config['hexapod_z'] = val
+        self.poly_z = np.poly1d(val)
+
+    @property
+    def hexapod_u(self):
+        return self.config['hexapod_u']
+
+    @hexapod_u.setter
+    def hexapod_u(self, val):
+        self.config['hexapod_u'] = val
+        self.poly_u = np.poly1d(val)
+
+    @property
+    def hexapod_v(self):
+        return self.config['hexapod_v']
+
+    @hexapod_v.setter
+    def hexapod_v(self, val):
+        self.config['hexapod_v'] = val
+        self.poly_v = np.poly1d(val)

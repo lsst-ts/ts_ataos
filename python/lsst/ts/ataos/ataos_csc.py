@@ -84,11 +84,18 @@ class ATAOS(ConfigurableCsc):
         self.camera_exposing = False  # flag to monitor if camera is exposing
 
         # Remotes
-        self.mcs = Remote(SALPY_ATMCS, include=["target"])
+        self.mcs = Remote(SALPY_ATMCS, include=["target", "mountEncoders"])
         self.pneumatics = Remote(SALPY_ATPneumatics, include=["m1SetPressure",
-                                                              "m2SetPressure"])
+                                                              "m2SetPressure",
+                                                              "m1OpenAirValve",
+                                                              "m2OpenAirValve",
+                                                              "m1CloseAirValve",
+                                                              "m2CloseAirValve"])
         self.hexapod = Remote(SALPY_ATHexapod, include=["moveToPosition", "positionUpdate"])
         self.camera = Remote(SALPY_ATCamera, include=["shutterDetailedState"])
+
+        self.target_azimuth = None
+        self.target_elevation = None
 
         self.azimuth = None
         self.elevation = None
@@ -169,7 +176,8 @@ class ATAOS(ConfigurableCsc):
         """
         # Flush event queue to make sure only current values are accounted for!
         self.mcs.evt_target.flush()
-        self.mcs.evt_target.callback = self.update_position_callback
+        self.mcs.evt_target.callback = self.update_target_position_callback
+        self.mcs.tel_mountEncoders.callback = self.update_mount_position_callback
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
 
     async def end_disable(self, id_data):
@@ -185,6 +193,12 @@ class ATAOS(ConfigurableCsc):
         """
 
         self.mcs.evt_target.callback = None
+        self.target_elevation = None
+        self.target_azimuth = None
+
+        self.mcs.tel_mountEncoders.callback = None
+        self.azimuth = None
+        self.elevation = None
         if not self.correction_loop_task.done():
             self.correction_loop_task.cancel()
 
@@ -285,6 +299,29 @@ class ATAOS(ConfigurableCsc):
         self.assert_enabled('enableCorrection')
         self.assert_any_corrections(id_data.data)
         asyncio.sleep(0.)  # give control back to event loop
+
+        try:
+            if id_data.data.m1 or id_data.data.enableAll:
+                # Setting m1 pressure to zero and open valve before starting
+                self.pneumatics.cmd_m1SetPressure.set(pressure=0.)
+                await self.pneumatics.cmd_m1SetPressure.start(timeout=self.cmd_timeout)
+                await self.pneumatics.cmd_m1OpenAirValve.start(timeout=self.cmd_timeout)
+        except Exception as e:
+            self.log.error("Failed to open m1 air valve.")
+            self.log.exception(e)
+            raise e
+
+        try:
+            if id_data.data.m2 or id_data.data.enableAll:
+                # Setting m1 pressure to zero and open valve before starting
+                self.pneumatics.cmd_m2SetPressure.set(pressure=0.)
+                await self.pneumatics.cmd_m2SetPressure.start(timeout=self.cmd_timeout)
+                await self.pneumatics.cmd_m2OpenAirValve.start(timeout=self.cmd_timeout)
+        except Exception as e:
+            self.log.error("Failed to open m2 air valve.")
+            self.log.exception(e)
+            raise e
+
         self.mark_corrections(id_data.data, True)
         asyncio.sleep(0.)  # give control back to event loop
         self.publish_enable_corrections()
@@ -303,6 +340,27 @@ class ATAOS(ConfigurableCsc):
         self.assert_enabled('disableCorrection')
         self.assert_any_corrections(id_data.data)
         asyncio.sleep(0.)  # give control back to event loop
+
+        try:
+            if id_data.data.m1 or id_data.data.disableAll:
+                # Setting m1 pressure to zero and open valve before starting
+                self.pneumatics.cmd_m1SetPressure.set(pressure=0.)
+                await self.pneumatics.cmd_m1SetPressure.start(timeout=self.cmd_timeout)
+                await self.pneumatics.cmd_m1CloseAirValve.start(timeout=self.cmd_timeout)
+        except Exception as e:
+            self.log.error("Failed to close m1 air valve.")
+            self.log.exception(e)
+
+        try:
+            if id_data.data.m2 or id_data.data.disableAll:
+                # Setting m1 pressure to zero and open valve before starting
+                self.pneumatics.cmd_m2SetPressure.set(pressure=0.)
+                await self.pneumatics.cmd_m2SetPressure.start(timeout=self.cmd_timeout)
+                await self.pneumatics.cmd_m2CloseAirValve.start(timeout=self.cmd_timeout)
+        except Exception as e:
+            self.log.error("Failed to close m2 air valve.")
+            self.log.exception(e)
+
         self.mark_corrections(id_data.data, False)
         asyncio.sleep(0.)  # give control back to event loop
         self.publish_enable_corrections()
@@ -335,12 +393,23 @@ class ATAOS(ConfigurableCsc):
                 # then waiting, the loop applies and wait at the same time.
                 corrections_to_apply = []
                 if self.azimuth is not None and self.elevation is not None:
+                    elevation = self.elevation
+                    azimuth = self.azimuth
+
+                    if self.target_elevation is not None and self.target_elevation < self.elevation:
+                        # Telescope in going down, need to go ahead and decrease
+                        # pressure accordingly
+                        elevation = (self.target_elevation + self.elevation)/2.
+                        self.log.debug(f"Telescope going down, getting ahead on correction."
+                                       f"el: {self.elevation}, target_el: {self.target_elevation}, "
+                                       f"corr_el: {elevation}")
+
                     for correction in self.corrections:
                         if self.corrections[correction] and correction in self.corrections_routines:
                             self.log.debug(f"Adding {correction} correction.")
                             corrections_to_apply.append(
-                                self.corrections_routines[correction](self.azimuth,
-                                                                      self.elevation))
+                                self.corrections_routines[correction](azimuth,
+                                                                      elevation))
                 else:
                     self.log.debug("No information available about telescope azimuth and/or "
                                    "elevation.")
@@ -634,16 +703,27 @@ class ATAOS(ConfigurableCsc):
                 # correction completed... flip bit on detailedState
                 self.detailed_state = self.detailed_state ^ status_bit
 
-    def update_position_callback(self, id_data):
-        """Callback function to update the telescope position.
+    def update_target_position_callback(self, id_data):
+        """Callback function to update the target telescope position.
 
         Parameters
         ----------
         id_data : SALPY_ATMCS.ATMCS_logevent_target
 
         """
-        self.azimuth = id_data.azimuth
-        self.elevation = id_data.elevation
+        self.target_azimuth = id_data.azimuth
+        self.target_elevation = id_data.elevation
+
+    def update_mount_position_callback(self, id_data):
+        """Callback function to update the position of the telescope.
+
+        Parameters
+        ----------
+        id_data : SALPY_ATMCS.ATMCS_mountEncoders
+
+        """
+        self.azimuth = id_data.azimuthCalculatedAngle
+        self.elevation = id_data.elevationCalculatedAngle
 
     @staticmethod
     def get_config_pkg():
@@ -666,8 +746,11 @@ class ATAOS(ConfigurableCsc):
 
         self.correction_loop_time = 1./config.correction_frequency
 
-        for key in self.model.config:
-            self.model.config[key] = getattr(config, key)
+        for key in ['m1', 'm2', 'hexapod_x', 'hexapod_y', 'hexapod_z', 'hexapod_u', 'hexapod_v']:
+            if hasattr(config, key):
+                setattr(self.model, key, getattr(config, key))
+            else:
+                setattr(self.model, key, [0.])
 
     def fault(self, code=None, report=""):
         """Enter the fault state.
