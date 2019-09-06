@@ -41,7 +41,8 @@ class TestModel(unittest.TestCase):
                        'hexapod_v': [np.random.rand()],
                        }
 
-        model.config = test_config
+        for key in test_config:
+            setattr(model, key, test_config[key])
 
         # correction is a polynome so all values should be equal to the
         # values on test_config
