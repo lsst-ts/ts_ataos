@@ -5,7 +5,10 @@ import enum
 import pathlib
 import numpy as np
 
-from lsst.ts.salobj import base_csc, ConfigurableCsc, Remote, State
+from lsst.ts.salobj import (base_csc, ConfigurableCsc, Remote, State,
+                            AckError, SalRetCode)
+
+from lsst.ts.idl.enums import ATPneumatics
 
 from .model import Model
 
@@ -70,6 +73,9 @@ class ATAOS(ConfigurableCsc):
         # regular timeout for commands to remotes = 60 heartbeats (!?)
         self.cmd_timeout = 60.*base_csc.HEARTBEAT_INTERVAL
 
+        # fast timeout
+        self.fast_timeout = 5.*base_csc.HEARTBEAT_INTERVAL
+
         self.correction_loop_task = None
         # Time between corrections
         self.correction_loop_time = base_csc.HEARTBEAT_INTERVAL
@@ -77,15 +83,29 @@ class ATAOS(ConfigurableCsc):
         self.camera_exposing = False  # flag to monitor if camera is exposing
 
         # Remotes
-        self.mcs = Remote(self.domain, "ATMCS", include=["target", "mountEncoders"])
+        self.mcs = Remote(self.domain, "ATMCS", include=["target", "mount_AzEl_Encoders"])
         self.pneumatics = Remote(self.domain, "ATPneumatics", include=["m1SetPressure",
                                                                        "m2SetPressure",
                                                                        "m1OpenAirValve",
                                                                        "m2OpenAirValve",
                                                                        "m1CloseAirValve",
-                                                                       "m2CloseAirValve"])
+                                                                       "m2CloseAirValve",
+                                                                       "openMasterAirSupply",
+                                                                       "openInstrumentAirValve",
+                                                                       "m1State",
+                                                                       "m2State",
+                                                                       "instrumentState",
+                                                                       "mainValveState",
+                                                                       "summaryState"])
+
         self.hexapod = Remote(self.domain, "ATHexapod", include=["moveToPosition", "positionUpdate"])
         self.camera = Remote(self.domain, "ATCamera", include=["shutterDetailedState"])
+
+        self.pneumatics_summary_state = None
+        self.pneumatics_main_valve_state = None
+        self.pneumatics_instrument_valve_state = None
+        self.pneumatics_m1_state = None
+        self.pneumatics_m2_state = None
 
         self.target_azimuth = None
         self.target_elevation = None
@@ -156,6 +176,94 @@ class ATAOS(ConfigurableCsc):
         # self.evt_correctionEnabled.set(moveWhileExposing=bool(value))
         self._move_while_exposing = bool(value)
 
+    async def begin_start(self, data):
+        """Begin do_start; called before state changes.
+
+        Get state information from ATPneumatics and set callbacks to monitor
+        state of the component.
+
+        Parameters
+        ----------
+        data : `DataType`
+            Command data
+        """
+
+        if self.pneumatics_summary_state is None:
+            try:
+                await self.pneumatics.evt_summaryState.next(flush=False,
+                                                            timeout=self.fast_timeout)
+            except asyncio.TimeoutError:
+                self.log.warning("Could not get summary state from ATPneumatics.")
+            # Trick to get last value, until aget is available.
+            ss = self.pneumatics.evt_summaryState.get()
+            if ss is not None:
+                self.pneumatics_summary_state = State(ss.summaryState)
+
+            # set callback to monitor summary state from now on...
+            self.pneumatics.evt_summaryState.callback = self.pneumatics_ss_callback
+
+        if self.pneumatics_main_valve_state is None:
+            try:
+                await self.pneumatics.evt_mainValveState.next(flush=False,
+                                                              timeout=self.fast_timeout)
+            except asyncio.TimeoutError:
+                self.log.warning("Could not get main valve state from ATPneumatics.")
+
+            # Trick to get last value, until aget is available.
+            mvs = self.pneumatics.evt_mainValveState.get()
+            if mvs is not None:
+                self.pneumatics_main_valve_state = ATPneumatics.AirValveState(mvs.state)
+
+            # set callback to monitor main valve state from now on...
+            self.pneumatics.evt_mainValveState.callback = self.pneumatics_mvs_callback
+
+        if self.pneumatics_instrument_valve_state is None:
+            try:
+                await self.pneumatics.evt_instrumentState.next(flush=False,
+                                                               timeout=self.fast_timeout)
+            except asyncio.TimeoutError:
+                self.log.warning("Could not get instrument valve state from ATPneumatics.")
+
+            # Trick to get last value, until aget is available.
+            ivs = self.pneumatics.evt_instrumentState.get()
+            if ivs is not None:
+                self.pneumatics_instrument_valve_state = ATPneumatics.AirValveState(ivs.state)
+
+            # set callback to monitor instrument valve state from now on...
+            self.pneumatics.evt_instrumentState.callback = self.pneumatics_iv_callback
+
+        if self.pneumatics_m1_state is None:
+            try:
+                await self.pneumatics.evt_m1State.next(flush=False,
+                                                       timeout=self.fast_timeout)
+            except asyncio.TimeoutError:
+                self.log.warning("Could not get m1 valve state from ATPneumatics.")
+
+            # Trick to get last value, until aget is available.
+            m1s = self.pneumatics.evt_m1State.get()
+            if m1s is not None:
+                self.pneumatics_m1_state = ATPneumatics.AirValveState(m1s.state)
+
+            # set callback to monitor m1 valve state from now on...
+            self.pneumatics.evt_m1State.callback = self.pneumatics_m1s_callback
+
+        if self.pneumatics_m2_state is None:
+            try:
+                await self.pneumatics.evt_m2State.next(flush=False,
+                                                       timeout=self.fast_timeout)
+            except asyncio.TimeoutError:
+                self.log.warning("Could not get m2 valve state from ATPneumatics.")
+
+            # Trick to get last value, until aget is available.
+            m2s = self.pneumatics.evt_m2State.get()
+            if m2s is not None:
+                self.pneumatics_m2_state = ATPneumatics.AirValveState(m2s.state)
+
+            # set callback to monitor m2 valve state from now on...
+            self.pneumatics.evt_m2State.callback = self.pneumatics_m2s_callback
+
+        await super().begin_start(data)
+
     async def end_enable(self, id_data):
         """End do_enable; called after state changes but before command
         acknowledged.
@@ -170,7 +278,7 @@ class ATAOS(ConfigurableCsc):
         # Flush event queue to make sure only current values are accounted for!
         self.mcs.evt_target.flush()
         self.mcs.evt_target.callback = self.update_target_position_callback
-        self.mcs.tel_mountEncoders.callback = self.update_mount_position_callback
+        self.mcs.tel_mount_AzEl_Encoders.callback = self.update_mount_position_callback
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
 
     async def end_disable(self, id_data):
@@ -189,7 +297,7 @@ class ATAOS(ConfigurableCsc):
         self.target_elevation = None
         self.target_azimuth = None
 
-        self.mcs.tel_mountEncoders.callback = None
+        self.mcs.tel_mount_AzEl_Encoders.callback = None
         self.azimuth = None
         self.elevation = None
         if not self.correction_loop_task.done():
@@ -236,6 +344,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.assert_enabled('applyCorrection')
         self.assert_corrections(enabled=False)
+        self.log.debug("Apply correction")
 
         # FIXME: Get position from telescope if elevation = 0.
         azimuth = id_data.azimuth % 360.
@@ -249,8 +358,11 @@ class ATAOS(ConfigurableCsc):
             azimuth = self.azimuth
             elevation = self.elevation
 
+        self.log.debug("Apply correction Hexapod")
         await self.set_hexapod(azimuth, elevation)
+        self.log.debug("Apply correction M1")
         await self.set_pressure("m1", azimuth, elevation)
+        self.log.debug("Apply correction M2")
         await self.set_pressure("m2", azimuth, elevation)
 
         # FIXME: THIS is not working with the current version of the software
@@ -295,10 +407,27 @@ class ATAOS(ConfigurableCsc):
 
         try:
             if id_data.m1 or id_data.enableAll:
-                # Setting m1 pressure to zero and open valve before starting
-                self.pneumatics.cmd_m1SetPressure.set(pressure=0.)
-                await self.pneumatics.cmd_m1SetPressure.start(timeout=self.cmd_timeout)
-                await self.pneumatics.cmd_m1OpenAirValve.start(timeout=self.cmd_timeout)
+                await self.check_atpneumatic()
+                try:
+                    if self.pneumatics_m1_state != ATPneumatics.AirValveState.OPEN:
+                        await self.pneumatics.cmd_m1OpenAirValve.start(timeout=self.cmd_timeout)
+                except AckError as e:
+                    if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
+                        self.log.warning("M1 valve is already opened.")
+                        self.log.exception(e)
+                    else:
+                        raise e
+
+                # FIXME: ATPneumatics is not ready to set pressure just after
+                # the valve is opened and there is currently no event to
+                # indicate readiness. I'll wait 1 second after command
+                # finishes. Once this is fixed the sleep can be removed.
+                await asyncio.sleep(1.)
+
+                # Set pressure to zero.
+                await self.pneumatics.cmd_m1SetPressure.set_start(pressure=0.,
+                                                                  timeout=self.cmd_timeout)
+
         except Exception as e:
             self.log.error("Failed to open m1 air valve.")
             self.log.exception(e)
@@ -306,10 +435,20 @@ class ATAOS(ConfigurableCsc):
 
         try:
             if id_data.m2 or id_data.enableAll:
-                # Setting m1 pressure to zero and open valve before starting
-                self.pneumatics.cmd_m2SetPressure.set(pressure=0.)
-                await self.pneumatics.cmd_m2SetPressure.start(timeout=self.cmd_timeout)
-                await self.pneumatics.cmd_m2OpenAirValve.start(timeout=self.cmd_timeout)
+                await self.check_atpneumatic()
+                try:
+                    if self.pneumatics_m2_state != ATPneumatics.AirValveState.OPEN:
+                        await self.pneumatics.cmd_m2OpenAirValve.start(timeout=self.cmd_timeout)
+                except AckError as e:
+                    if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
+                        self.log.warning("M2 valve is already opened.")
+                        self.log.exception(e)
+                    else:
+                        raise e
+                # Set pressure to zero.
+
+                await self.pneumatics.cmd_m2SetPressure.set_start(pressure=0.,
+                                                                  timeout=self.cmd_timeout)
         except Exception as e:
             self.log.error("Failed to open m2 air valve.")
             self.log.exception(e)
@@ -336,7 +475,7 @@ class ATAOS(ConfigurableCsc):
 
         try:
             if id_data.m1 or id_data.disableAll:
-                # Setting m1 pressure to zero and open valve before starting
+                # Setting m1 pressure to zero and close valve
                 self.pneumatics.cmd_m1SetPressure.set(pressure=0.)
                 await self.pneumatics.cmd_m1SetPressure.start(timeout=self.cmd_timeout)
                 await self.pneumatics.cmd_m1CloseAirValve.start(timeout=self.cmd_timeout)
@@ -346,7 +485,7 @@ class ATAOS(ConfigurableCsc):
 
         try:
             if id_data.m2 or id_data.disableAll:
-                # Setting m1 pressure to zero and open valve before starting
+                # Setting m1 pressure to zero and close valve
                 self.pneumatics.cmd_m2SetPressure.set(pressure=0.)
                 await self.pneumatics.cmd_m2SetPressure.start(timeout=self.cmd_timeout)
                 await self.pneumatics.cmd_m2CloseAirValve.start(timeout=self.cmd_timeout)
@@ -715,8 +854,8 @@ class ATAOS(ConfigurableCsc):
         id_data : SALPY_ATMCS.ATMCS_mountEncoders
 
         """
-        self.azimuth = id_data.azimuthCalculatedAngle
-        self.elevation = id_data.elevationCalculatedAngle
+        self.azimuth = id_data.azimuthCalculatedAngle[-1]
+        self.elevation = id_data.elevationCalculatedAngle[-1]
 
     @staticmethod
     def get_config_pkg():
@@ -745,6 +884,24 @@ class ATAOS(ConfigurableCsc):
             else:
                 setattr(self.model, key, [0.])
 
+    async def check_atpneumatic(self):
+        """Check that the main and instrument valves on ATPneumatics are open.
+        Open then is they are closed.
+        """
+
+        if self.pneumatics_summary_state != State.ENABLED:
+            raise RuntimeError(f"ATPneumatics in {self.pneumatics_summary_state}. "
+                               f"Expected {State.ENABLED}. Enable CSC before "
+                               f"activating corrections.")
+
+        if self.pneumatics_main_valve_state != ATPneumatics.AirValveState.OPEN:
+            self.log.debug("ATPneumatics main valve not opened, trying to open it.")
+            await self.pneumatics.cmd_openMasterAirSupply.start(timeout=self.cmd_timeout)
+
+        if self.pneumatics_instrument_valve_state != ATPneumatics.AirValveState.OPEN:
+            self.log.debug("ATPneumatics instrument valve not opened, trying to open it.")
+            await self.pneumatics.cmd_openInstrumentAirValve.start(timeout=self.cmd_timeout)
+
     def fault(self, code=None, report=""):
         """Enter the fault state.
 
@@ -769,3 +926,53 @@ class ATAOS(ConfigurableCsc):
         self.publish_enable_corrections()
 
         super().fault(code=code, report=report)
+
+    def pneumatics_ss_callback(self, data):
+        """Callback to monitor summary state from atpneumatics.
+
+        Parameters
+        ----------
+        data
+
+        """
+        self.pneumatics_summary_state = State(data.summaryState)
+
+    def pneumatics_mvs_callback(self, data):
+        """Callback to monitor main valve state from atpneumatics.
+
+        Parameters
+        ----------
+        data
+
+        """
+        self.pneumatics_main_valve_state = ATPneumatics.AirValveState(data.state)
+
+    def pneumatics_iv_callback(self, data):
+        """Callback to monitor instrument valve state from atpneumatics.
+
+        Parameters
+        ----------
+        data
+
+        """
+        self.pneumatics_instrument_valve_state = ATPneumatics.AirValveState(data.state)
+
+    def pneumatics_m1s_callback(self, data):
+        """Callback to monitor m1 valve state from atpneumatics.
+
+        Parameters
+        ----------
+        data
+
+        """
+        self.pneumatics_m1_state = ATPneumatics.AirValveState(data.state)
+
+    def pneumatics_m2s_callback(self, data):
+        """Callback to monitor m2 valve state from atpneumatics.
+
+        Parameters
+        ----------
+        data
+
+        """
+        self.pneumatics_m2_state = ATPneumatics.AirValveState(data.state)
