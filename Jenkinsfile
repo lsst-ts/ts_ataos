@@ -10,9 +10,9 @@ pipeline {
             steps {
                 script {
                     sh """
-                    docker pull lsstts/develop-env:salobj4_master
-                    chmod -R a+rw \${WORKSPACE}
-                    container=\$(docker run -v \${WORKSPACE}:/home/saluser/repo/ -td --rm --name \${container_name} -e LTD_USERNAME=\${user_ci_USR} -e LTD_PASSWORD=\${user_ci_PSW} lsstts/develop-env:salobj4_master)
+                    docker pull lsstts/develop-env:salobj4_b54
+                    chmod -R a+rw \${WORKSPACE} || echo "Failed to set workspace mode"
+                    container=\$(docker run -v \${WORKSPACE}:/home/saluser/repo/ -td --rm --name \${container_name} -e LTD_USERNAME=\${user_ci_USR} -e LTD_PASSWORD=\${user_ci_PSW} lsstts/develop-env:salobj4_b54)
                     docker exec -u saluser \${container_name} sh -c \"source ~/.setup.sh && source ~/.bashrc && make_idl_files.py ATAOS ATMCS ATPneumatics ATHexapod ATCamera ATPtg\"
                     docker exec -u saluser \${container_name} sh -c \"source ~/.setup.sh && cd repo && eups declare -r . -t saluser && setup ts_ataos -t saluser && scons\"
                     """

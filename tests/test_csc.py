@@ -9,6 +9,8 @@ from lsst.ts import salobj
 
 from lsst.ts.ataos import ataos_csc
 
+from lsst.ts.idl.enums import ATPneumatics
+
 np.random.seed(47)
 
 index_gen = salobj.index_generator()
@@ -106,9 +108,9 @@ class TestCSC(unittest.TestCase):
 
                 # send start; new state is DISABLED
                 cmd_attr = getattr(harness.aos_remote, f"cmd_start")
-                state_coro = harness.aos_remote.evt_summaryState.next(flush=True, timeout=1.)
+                harness.aos_remote.evt_summaryState.flush()
                 id_ack = await cmd_attr.start(timeout=120)  # this one can take longer to execute
-                state = await state_coro
+                state = await harness.aos_remote.evt_summaryState.next(flush=False, timeout=5.)
                 self.assertEqual(id_ack.ack, salobj.SalRetCode.CMD_COMPLETE)
                 self.assertEqual(id_ack.error, 0)
                 self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
@@ -133,9 +135,9 @@ class TestCSC(unittest.TestCase):
 
                 # send enable; new state is ENABLED
                 cmd_attr = getattr(harness.aos_remote, f"cmd_enable")
-                state_coro = harness.aos_remote.evt_summaryState.next(flush=True, timeout=1.)
-                id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=1.)
-                state = await state_coro
+                harness.aos_remote.evt_summaryState.flush()
+                id_ack = await cmd_attr.start(timeout=120)  # this one can take longer to execute
+                state = await harness.aos_remote.evt_summaryState.next(flush=False, timeout=5.)
                 self.assertEqual(id_ack.ack, salobj.SalRetCode.CMD_COMPLETE)
                 self.assertEqual(id_ack.error, 0)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
@@ -176,13 +178,30 @@ class TestCSC(unittest.TestCase):
                 def hexapod_move_callback(data):
                     harness.hexapod.evt_positionUpdate.put()
 
-                # Add callback to commands from pneumatics and hexapod
+                def m1_open_callback(data):
+                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.OPEN)
+
+                def m2_open_callback(data):
+                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.OPEN)
+
+                def m1_close_callback(data):
+                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+
+                def m2_close_callback(data):
+                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+
                 harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
                 harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
-                harness.pnematics.cmd_m1OpenAirValve.callback = Mock(wraps=callback)
-                harness.pnematics.cmd_m2OpenAirValve.callback = Mock(wraps=callback)
-                harness.pnematics.cmd_m1CloseAirValve.callback = Mock(wraps=callback)
-                harness.pnematics.cmd_m2CloseAirValve.callback = Mock(wraps=callback)
+                harness.pnematics.cmd_m1OpenAirValve.callback = Mock(wraps=m1_open_callback)
+                harness.pnematics.cmd_m2OpenAirValve.callback = Mock(wraps=m2_open_callback)
+                harness.pnematics.cmd_m1CloseAirValve.callback = Mock(wraps=m1_close_callback)
+                harness.pnematics.cmd_m2CloseAirValve.callback = Mock(wraps=m2_close_callback)
+
+                harness.pnematics.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+                harness.pnematics.evt_mainValveState.set_put(state=ATPneumatics.AirValveState.OPEN)
+                harness.pnematics.evt_instrumentState.set_put(state=ATPneumatics.AirValveState.OPEN)
+                harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+                harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSE)
 
                 # FIXME: Check if this is correct! Is there a difference in
                 # command to move hexapod and focus or they will use the same
@@ -192,7 +211,7 @@ class TestCSC(unittest.TestCase):
                 # Add callback to events
                 harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
 
-                timeout = 5 * salobj.base_csc.HEARTBEAT_INTERVAL
+                timeout = 40. * salobj.base_csc.HEARTBEAT_INTERVAL
                 # Enable the CSC
                 await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
@@ -222,22 +241,23 @@ class TestCSC(unittest.TestCase):
                 coro_hx_end = harness.aos_remote.evt_hexapodCorrectionCompleted.next(flush=False,
                                                                                      timeout=timeout)
 
-                # Publish telescope position using atmcs controller from harness
-                topic = harness.atmcs.tel_mountEncoders.DataType()
-
+                # Send applyCorrection command
                 azimuth = np.random.uniform(0., 360.)
                 # make sure it is never zero because np.random.uniform is [min, max)
-                elevation = 90.-np.random.uniform(0., 90.)
+                elevation = 90. - np.random.uniform(0., 90.)
 
-                topic.azimuthCalculatedAngle = azimuth
-                topic.elevationCalculatedAngle = elevation
+                async def publish_mountEnconders(ntimes=5):
 
-                async def publish_mountEnconders(topic, ntimes=5):
                     for i in range(ntimes):
-                        harness.atmcs.tel_mountEncoders.put(topic)
+                        _azimuth = np.zeros(100)+azimuth
+                        # make sure it is never zero because np.random.uniform is [min, max)
+                        _elevation = np.zeros(100)+elevation
+                        harness.atmcs.tel_mount_AzEl_Encoders.set_put(
+                            azimuthCalculatedAngle=_azimuth,
+                            elevationCalculatedAngle=_elevation)
                         await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
 
-                await publish_mountEnconders(topic)
+                await publish_mountEnconders()
 
                 # Test that the hexapod won't move if there's an exposure happening
                 if while_exposing:
@@ -247,13 +267,13 @@ class TestCSC(unittest.TestCase):
                     # Give some time for the CSC to grab that event
                     await asyncio.sleep(2.)
 
-                # Send applyCorrection command
-
                 if not get_tel_pos:
+                    await asyncio.sleep(5 * salobj.base_csc.HEARTBEAT_INTERVAL)
                     await harness.aos_remote.cmd_applyCorrection.set_start(azimuth=azimuth,
                                                                            elevation=elevation,
                                                                            timeout=timeout)
                 else:
+                    await asyncio.sleep(5 * salobj.base_csc.HEARTBEAT_INTERVAL)
                     await harness.aos_remote.cmd_applyCorrection.start(timeout=timeout)
 
                 # Give control back to event loop so it can gather remaining callbacks
@@ -291,10 +311,10 @@ class TestCSC(unittest.TestCase):
                     if component is None:
                         continue
 
-                    with self.subTest(component=component, topic=topic):
-                        self.assertEqual(component.azimuth, topic.azimuthCalculatedAngle)
-                    with self.subTest(component=component, topic=topic):
-                        self.assertEqual(component.elevation, topic.elevationCalculatedAngle)
+                    with self.subTest(component=component, azimuth=azimuth):
+                        self.assertEqual(component.azimuth, azimuth)
+                    with self.subTest(component=component, elevation=elevation):
+                        self.assertEqual(component.elevation, elevation)
 
                 self.assertEqual(
                     len(harness.aos_remote.evt_detailedState.callback.call_args_list),
@@ -333,12 +353,30 @@ class TestCSC(unittest.TestCase):
                 def callback(data):
                     pass
 
+                def m1_open_callback(data):
+                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.OPEN)
+
+                def m2_open_callback(data):
+                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.OPEN)
+
+                def m1_close_callback(data):
+                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+
+                def m2_close_callback(data):
+                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+
                 harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
                 harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
-                harness.pnematics.cmd_m1OpenAirValve.callback = Mock(wraps=callback)
-                harness.pnematics.cmd_m2OpenAirValve.callback = Mock(wraps=callback)
-                harness.pnematics.cmd_m1CloseAirValve.callback = Mock(wraps=callback)
-                harness.pnematics.cmd_m2CloseAirValve.callback = Mock(wraps=callback)
+                harness.pnematics.cmd_m1OpenAirValve.callback = Mock(wraps=m1_open_callback)
+                harness.pnematics.cmd_m2OpenAirValve.callback = Mock(wraps=m2_open_callback)
+                harness.pnematics.cmd_m1CloseAirValve.callback = Mock(wraps=m1_close_callback)
+                harness.pnematics.cmd_m2CloseAirValve.callback = Mock(wraps=m2_close_callback)
+
+                harness.pnematics.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+                harness.pnematics.evt_mainValveState.set_put(state=ATPneumatics.AirValveState.OPEN)
+                harness.pnematics.evt_instrumentState.set_put(state=ATPneumatics.AirValveState.OPEN)
+                harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+                harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSE)
 
                 cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
 
