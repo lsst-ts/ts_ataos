@@ -409,7 +409,7 @@ class ATAOS(ConfigurableCsc):
             if id_data.m1 or id_data.enableAll:
                 await self.check_atpneumatic()
                 try:
-                    if self.pneumatics_m1_state != ATPneumatics.AirValveState.OPEN:
+                    if self.pneumatics_m1_state != ATPneumatics.AirValveState.OPENED:
                         await self.pneumatics.cmd_m1OpenAirValve.start(timeout=self.cmd_timeout)
                 except AckError as e:
                     if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
@@ -437,7 +437,7 @@ class ATAOS(ConfigurableCsc):
             if id_data.m2 or id_data.enableAll:
                 await self.check_atpneumatic()
                 try:
-                    if self.pneumatics_m2_state != ATPneumatics.AirValveState.OPEN:
+                    if self.pneumatics_m2_state != ATPneumatics.AirValveState.OPENED:
                         await self.pneumatics.cmd_m2OpenAirValve.start(timeout=self.cmd_timeout)
                 except AckError as e:
                     if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
@@ -894,11 +894,11 @@ class ATAOS(ConfigurableCsc):
                                f"Expected {State.ENABLED}. Enable CSC before "
                                f"activating corrections.")
 
-        if self.pneumatics_main_valve_state != ATPneumatics.AirValveState.OPEN:
+        if self.pneumatics_main_valve_state != ATPneumatics.AirValveState.OPENED:
             self.log.debug("ATPneumatics main valve not opened, trying to open it.")
             await self.pneumatics.cmd_openMasterAirSupply.start(timeout=self.cmd_timeout)
 
-        if self.pneumatics_instrument_valve_state != ATPneumatics.AirValveState.OPEN:
+        if self.pneumatics_instrument_valve_state != ATPneumatics.AirValveState.OPENED:
             self.log.debug("ATPneumatics instrument valve not opened, trying to open it.")
             await self.pneumatics.cmd_openInstrumentAirValve.start(timeout=self.cmd_timeout)
 
