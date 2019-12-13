@@ -2,18 +2,51 @@ pipeline {
     agent any
     environment {
         container_name = "c_${BUILD_ID}_${JENKINS_NODE_COOKIE}"
+        image_tag = "sal_v4.0.0_salobj_v5.0.0"
         user_ci = credentials('lsst-io')
     }
 
     stages {
+        stage("Pull docker image") {
+            steps {
+                script {
+                    sh """
+                    docker pull lsstts/develop-env:\${image_tag}
+                    """
+                }
+            }
+        }
+        stage("Prepare Workspace") {
+            steps {
+                script {
+                    sh """
+                    chmod -R a+rw \${WORKSPACE} || echo "Failed to set workspace mode"
+                    """
+                }
+            }
+        }
+        stage("Run container") {
+            steps {
+                script {
+                    sh """
+                    container=\$(docker run -v \${WORKSPACE}:/home/saluser/repo/ -td --rm --name \${container_name} -e LTD_USERNAME=\${user_ci_USR} -e LTD_PASSWORD=\${user_ci_PSW} lsstts/develop-env:\${image_tag})
+                    """
+                }
+            }
+        }
+        stage("Build IDL Files") {
+            steps {
+                script {
+                    sh """
+                    docker exec -u saluser \${container_name} sh -c \"source ~/.setup.sh && source ~/.bashrc && make_idl_files.py ATAOS ATMCS ATPneumatics ATHexapod ATCamera ATPtg\"
+                    """
+                }
+            }
+        }
         stage("Running tests") {
             steps {
                 script {
                     sh """
-                    docker pull lsstts/develop-env:sal_v4.0.0_salobj_v5.0.0
-                    chmod -R a+rw \${WORKSPACE} || echo "Failed to set workspace mode"
-                    container=\$(docker run -v \${WORKSPACE}:/home/saluser/repo/ -td --rm --name \${container_name} -e LTD_USERNAME=\${user_ci_USR} -e LTD_PASSWORD=\${user_ci_PSW} lsstts/develop-env:salobj4_b54)
-                    docker exec -u saluser \${container_name} sh -c \"source ~/.setup.sh && source ~/.bashrc && make_idl_files.py ATAOS ATMCS ATPneumatics ATHexapod ATCamera ATPtg\"
                     docker exec -u saluser \${container_name} sh -c \"source ~/.setup.sh && cd repo && eups declare -r . -t saluser && setup ts_ataos -t saluser && scons\"
                     """
                 }
