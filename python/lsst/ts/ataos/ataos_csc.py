@@ -821,10 +821,8 @@ class ATAOS(ConfigurableCsc):
 
             evt_start_attr.put(start_topic)
             try:
-                self.hexapod.evt_positionUpdate.flush()
                 await cmd_attr.start(cmd_topic,
                                      timeout=self.cmd_timeout)
-                await self.hexapod.evt_positionUpdate.next(flush=False, timeout=self.cmd_timeout)
             except Exception as e:
                 self.log.warning(f"Failed to set hexapod position @ "
                                  f"AzEl: {azimuth}/{elevation}")
