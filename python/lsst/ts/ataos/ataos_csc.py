@@ -821,10 +821,10 @@ class ATAOS(ConfigurableCsc):
 
             evt_start_attr.put(start_topic)
             try:
-                coro = self.hexapod.evt_positionUpdate.next(flush=True, timeout=self.cmd_timeout)
+                self.hexapod.evt_positionUpdate.flush()
                 await cmd_attr.start(cmd_topic,
                                      timeout=self.cmd_timeout)
-                await coro
+                await self.hexapod.evt_positionUpdate.next(flush=False, timeout=self.cmd_timeout)
             except Exception as e:
                 self.log.warning(f"Failed to set hexapod position @ "
                                  f"AzEl: {azimuth}/{elevation}")
@@ -896,11 +896,25 @@ class ATAOS(ConfigurableCsc):
 
         if self.pneumatics_main_valve_state != ATPneumatics.AirValveState.OPENED:
             self.log.debug("ATPneumatics main valve not opened, trying to open it.")
-            await self.pneumatics.cmd_openMasterAirSupply.start(timeout=self.cmd_timeout)
+            try:
+                await self.pneumatics.cmd_openMasterAirSupply.start(timeout=self.cmd_timeout)
+            except AckError as e:
+                if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
+                    self.log.warning("Master valve is already opened.")
+                    self.log.exception(e)
+                else:
+                    raise e
 
         if self.pneumatics_instrument_valve_state != ATPneumatics.AirValveState.OPENED:
             self.log.debug("ATPneumatics instrument valve not opened, trying to open it.")
-            await self.pneumatics.cmd_openInstrumentAirValve.start(timeout=self.cmd_timeout)
+            try:
+                await self.pneumatics.cmd_openInstrumentAirValve.start(timeout=self.cmd_timeout)
+            except AckError as e:
+                if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
+                    self.log.warning("Instrument valve is already opened.")
+                    self.log.exception(e)
+                else:
+                    raise e
 
     def fault(self, code=None, report=""):
         """Enter the fault state.
