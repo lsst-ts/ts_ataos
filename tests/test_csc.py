@@ -179,16 +179,16 @@ class TestCSC(unittest.TestCase):
                     harness.hexapod.evt_positionUpdate.put()
 
                 def m1_open_callback(data):
-                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.OPEN)
+                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.OPENED)
 
                 def m2_open_callback(data):
-                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.OPEN)
+                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.OPENED)
 
                 def m1_close_callback(data):
-                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
                 def m2_close_callback(data):
-                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
                 harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
                 harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
@@ -198,10 +198,10 @@ class TestCSC(unittest.TestCase):
                 harness.pnematics.cmd_m2CloseAirValve.callback = Mock(wraps=m2_close_callback)
 
                 harness.pnematics.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
-                harness.pnematics.evt_mainValveState.set_put(state=ATPneumatics.AirValveState.OPEN)
-                harness.pnematics.evt_instrumentState.set_put(state=ATPneumatics.AirValveState.OPEN)
-                harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSE)
-                harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+                harness.pnematics.evt_mainValveState.set_put(state=ATPneumatics.AirValveState.OPENED)
+                harness.pnematics.evt_instrumentState.set_put(state=ATPneumatics.AirValveState.OPENED)
+                harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
+                harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
                 # FIXME: Check if this is correct! Is there a difference in
                 # command to move hexapod and focus or they will use the same
@@ -354,16 +354,16 @@ class TestCSC(unittest.TestCase):
                     pass
 
                 def m1_open_callback(data):
-                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.OPEN)
+                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.OPENED)
 
                 def m2_open_callback(data):
-                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.OPEN)
+                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.OPENED)
 
                 def m1_close_callback(data):
-                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
                 def m2_close_callback(data):
-                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
                 harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
                 harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
@@ -373,10 +373,10 @@ class TestCSC(unittest.TestCase):
                 harness.pnematics.cmd_m2CloseAirValve.callback = Mock(wraps=m2_close_callback)
 
                 harness.pnematics.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
-                harness.pnematics.evt_mainValveState.set_put(state=ATPneumatics.AirValveState.OPEN)
-                harness.pnematics.evt_instrumentState.set_put(state=ATPneumatics.AirValveState.OPEN)
-                harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSE)
-                harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSE)
+                harness.pnematics.evt_mainValveState.set_put(state=ATPneumatics.AirValveState.OPENED)
+                harness.pnematics.evt_instrumentState.set_put(state=ATPneumatics.AirValveState.OPENED)
+                harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
+                harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
                 cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
 
