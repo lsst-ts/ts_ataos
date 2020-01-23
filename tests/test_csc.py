@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import asyncio
 import numpy as np
 import logging
+import pathlib
 
 from lsst.ts import salobj
 
@@ -18,11 +19,15 @@ index_gen = salobj.index_generator()
 logger = logging.getLogger()
 logger.level = logging.DEBUG
 
+STD_TIMEOUT = 5  # standard command timeout (sec)
+LONG_TIMEOUT = 20  # timeout for starting SAL components (sec)
+TEST_CONFIG_DIR = pathlib.Path(__file__).parents[1].joinpath("tests", "data", "config")
+
 
 class Harness:
-    def __init__(self):
+    def __init__(self, config_dir=None):
         salobj.test_utils.set_random_lsst_dds_domain()
-        self.csc = ataos_csc.ATAOS()
+        self.csc = ataos_csc.ATAOS(config_dir=config_dir)
 
         # Adds a remote to control the ATAOS CSC
         self.aos_remote = salobj.Remote(self.csc.domain, "ATAOS")
@@ -335,9 +340,60 @@ class TestCSC(unittest.TestCase):
         # Run for specified location
         asyncio.get_event_loop().run_until_complete(doit(get_tel_pos=False))
 
-    def test_applyFocusOffset(self):
+    def test_offsets(self):
         """Test applyFocusOffset command."""
-        pass
+
+        async def doit():
+
+            async with Harness() as harness:
+
+                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED)
+                self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
+
+                offset_init = await harness.aos_remote.evt_correctionOffsets.next(
+                    flush=False,
+                    timeout=STD_TIMEOUT)
+
+                offset = {'m1': 1.0,
+                          'm2': 1.0,
+                          'x': 1.0,
+                          'y': 1.0,
+                          'z': 1.0,
+                          'u': 1.0,
+                          'v': 1.0
+                          }
+
+                for axis in offset:
+                    with self.subTest(axis=axis):
+                        self.assertEqual(0.,
+                                         getattr(offset_init, axis))
+
+                harness.aos_remote.evt_correctionOffsets.flush()
+
+                await harness.aos_remote.cmd_offset.set_start(**offset,
+                                                              timeout=STD_TIMEOUT)
+
+                offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
+                    flush=False,
+                    timeout=STD_TIMEOUT)
+
+                for axis in offset:
+                    with self.subTest(axis=axis):
+                        self.assertEqual(offset[axis],
+                                         getattr(offset_applied, axis))
+
+                await harness.aos_remote.cmd_resetOffset.start(timeout=STD_TIMEOUT)
+
+                offset_reset = await harness.aos_remote.evt_correctionOffsets.next(
+                    flush=False,
+                    timeout=LONG_TIMEOUT)
+
+                for axis in offset:
+                    with self.subTest(axis=axis):
+                        self.assertEqual(0.,
+                                         getattr(offset_reset, axis))
+
+        asyncio.get_event_loop().run_until_complete(doit())
 
     def test_enable_disable_corrections(self):
         """Test enableCorrection"""
