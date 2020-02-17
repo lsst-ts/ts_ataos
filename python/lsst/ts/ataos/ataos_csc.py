@@ -96,7 +96,9 @@ class ATAOS(ConfigurableCsc):
                                                                        "m2State",
                                                                        "instrumentState",
                                                                        "mainValveState",
-                                                                       "summaryState"])
+                                                                       "summaryState",
+                                                                       "m1AirPressure",
+                                                                       "m2AirPressure"])
 
         self.hexapod = Remote(self.domain, "ATHexapod", include=["moveToPosition", "positionUpdate"])
         self.camera = Remote(self.domain, "ATCamera", include=["shutterDetailedState"])
@@ -125,6 +127,29 @@ class ATAOS(ConfigurableCsc):
                             'hexapod': False,
                             'focus': False,
                             }
+
+        self.current_positions = {'m1': None,
+                                  'm2': None,
+                                  'x': None,
+                                  'y': None,
+                                  'z': None,
+                                  'u': None,
+                                  'v': None
+                                  }
+
+        # Add callback to get positions
+        self.hexapod.evt_positionUpdate.callback = self.hexapod_monitor_callback
+        self.pneumatics.tel_m1AirPressure.callback = self.m1_pressure_monitor_callback
+        self.pneumatics.tel_m2AirPressure.callback = self.m2_pressure_monitor_callback
+
+        self.correction_tolerance = {'m1': None,
+                                     'm2': None,
+                                     'x': None,
+                                     'y': None,
+                                     'z': None,
+                                     'u': None,
+                                     'v': None
+                                     }
 
         # Note that focus is not part of corrections routines, focus correction
         # is performed by the hexapod. A different logic is used when focus
@@ -279,6 +304,8 @@ class ATAOS(ConfigurableCsc):
         self.mcs.evt_target.flush()
         self.mcs.evt_target.callback = self.update_target_position_callback
         self.mcs.tel_mount_AzEl_Encoders.callback = self.update_mount_position_callback
+        self.evt_correctionOffsets.set_put(**self.model.offset,
+                                           force_output=True)
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
 
     async def end_disable(self, id_data):
@@ -361,9 +388,13 @@ class ATAOS(ConfigurableCsc):
         self.log.debug("Apply correction Hexapod")
         await self.set_hexapod(azimuth, elevation)
         self.log.debug("Apply correction M1")
-        await self.set_pressure("m1", azimuth, elevation)
+        await self.set_pressure("m1", azimuth, elevation,
+                                self.model.get_correction_m1(azimuth,
+                                                             elevation))
         self.log.debug("Apply correction M2")
-        await self.set_pressure("m2", azimuth, elevation)
+        await self.set_pressure("m2", azimuth, elevation,
+                                self.model.get_correction_m2(azimuth,
+                                                             elevation))
 
         # FIXME: THIS is not working with the current version of the software
         # need to see what is the problem. 2019/June/04
@@ -383,6 +414,63 @@ class ATAOS(ConfigurableCsc):
             Command ID and data
         """
         self.assert_enabled('applyFocusOffset')
+
+        self.model.set_offset("z", id_data.offset)
+
+    async def do_applyAxisOffset(self, id_data):
+        """Adds offset to selected axis correction.
+
+        Parameters
+        ----------
+        id_data : `CommandIdData`
+            Command ID and data
+        """
+        self.assert_enabled('applyFocusOffset')
+
+        self.model.set_offset(id_data.axis, id_data.offset)
+
+        self.evt_correctionOffsets.set_put(**self.model.offset,
+                                           force_output=True)
+
+    async def do_offset(self, data):
+        """Apply offsets to all axis.
+
+        Offsets are cumulative, e.g. if the command is sent twice, with the
+        same values you will get double the amount of offset.
+
+        Parameters
+        ----------
+        data
+
+        """
+        self.assert_enabled('offset')
+
+        for axis in self.model.offset:
+            self.model.add_offset(axis, getattr(data, axis))
+
+        self.evt_correctionOffsets.set_put(**self.model.offset,
+                                           force_output=True)
+
+    async def do_resetOffset(self, data):
+        """ Reset offset on a specific axis or all.
+
+        Parameters
+        ----------
+        data
+
+        """
+        self.assert_enabled('resetOffset')
+
+        if len(data.axis) == 0 or data.axis == 'all':
+            self.model.reset_offset()
+        elif data.axis in self.model.offset:
+            self.model.set_offset(data.axis, 0.)
+        else:
+            raise RuntimeError(f"Axis {data.axis} invalid. Must be one of "
+                               f"m1, m2, x, y, z, u, v, all or and empty string with length zero.")
+
+        self.evt_correctionOffsets.set_put(**self.model.offset,
+                                           force_output=True)
 
     async def do_enableCorrection(self, id_data):
         """Enable corrections on specified axis.
@@ -687,6 +775,41 @@ class ATAOS(ConfigurableCsc):
         """
         self.camera_exposing = data.substate != ShutterState.CLOSED
 
+    def hexapod_monitor_callback(self, data):
+        """A callback function to monitor position updates on the hexapod.
+
+        Parameters
+        ----------
+        data
+            Event data.
+
+        """
+        self.current_positions['x'] = data.positionX
+        self.current_positions['y'] = data.positionY
+        self.current_positions['z'] = data.positionZ
+        self.current_positions['u'] = data.positionU
+        self.current_positions['v'] = data.positionV
+
+    def m1_pressure_monitor_callback(self, data):
+        """ Callback function to monitor M1 pressure
+
+        Parameters
+        ----------
+        data
+
+        """
+        self.current_positions["m1"] = data.pressure
+
+    def m2_pressure_monitor_callback(self, data):
+        """ Callback function to monitor M2 pressure
+
+        Parameters
+        ----------
+        data
+
+        """
+        self.current_positions["m2"] = data.pressure
+
     async def set_pressure_m1(self, azimuth, elevation):
         """Set pressure on m1.
 
@@ -695,7 +818,13 @@ class ATAOS(ConfigurableCsc):
         azimuth : float
         elevation : float
         """
-        await self.set_pressure("m1", azimuth, elevation)
+        pressure = self.model.get_correction_m1(azimuth,
+                                                elevation)
+
+        await self.set_pressure("m1", azimuth, elevation,
+                                pressure,
+                                self.current_positions["m1"],
+                                self.correction_tolerance["m1"])
 
     async def set_pressure_m2(self, azimuth, elevation):
         """Set pressure on m2.
@@ -705,9 +834,16 @@ class ATAOS(ConfigurableCsc):
         azimuth : float
         elevation : float
         """
-        await self.set_pressure("m2", azimuth, elevation)
+        pressure = self.model.get_correction_m2(azimuth,
+                                                elevation)
 
-    async def set_pressure(self, mirror, azimuth, elevation):
+        await self.set_pressure("m2", azimuth, elevation,
+                                pressure,
+                                self.current_positions["m2"],
+                                self.correction_tolerance["m2"])
+
+    async def set_pressure(self, mirror, azimuth, elevation,
+                           pressure, current=None, tolerance=None):
         """Set pressure on specified mirror.
 
         Parameters
@@ -716,12 +852,22 @@ class ATAOS(ConfigurableCsc):
             Either m1 or m2
         azimuth : float
         elevation : float
+        pressure : float
+        current : float
+        tolerance : float
         """
         status_bit = getattr(DetailedState, f"{mirror}".upper())
 
         # Check that pressure is not being applied yet
         if self.detailed_state & status_bit != 0:
             self.log.warning("%s pressure correction running... skipping...", mirror)
+            return
+        elif current is not None and \
+                tolerance is not None and \
+                tolerance > 0. and \
+                np.abs(current - pressure) < tolerance:
+            self.log.debug(f"Set value ({pressure}) and current value ({current}) "
+                           f"inside tolerance ({tolerance}). Ignoring.")
             return
         else:
             # publish new detailed state
@@ -731,33 +877,23 @@ class ATAOS(ConfigurableCsc):
             evt_start_attr = getattr(self, f"evt_{mirror}CorrectionStarted")
             evt_end_attr = getattr(self, f"evt_{mirror}CorrectionCompleted")
 
-            cmd_topic = cmd_attr.DataType()
-            cmd_topic.pressure = getattr(self.model, f"get_correction_{mirror}")(azimuth,
-                                                                                 elevation)
-
             await asyncio.sleep(0.)  # give control back to the event loop
 
-            start_topic = evt_start_attr.DataType()
-            start_topic.azimuth = azimuth
-            start_topic.elevation = elevation
-            start_topic.pressure = cmd_topic.pressure
-
-            end_topic = evt_end_attr.DataType()
-            end_topic.azimuth = azimuth
-            end_topic.elevation = elevation
-            end_topic.pressure = cmd_topic.pressure
-
-            evt_start_attr.put(start_topic)
+            evt_start_attr.set_put(azimuth=azimuth,
+                                   elevation=elevation,
+                                   pressure=pressure)
             try:
-                await cmd_attr.start(cmd_topic,
-                                     timeout=self.cmd_timeout)
+                await cmd_attr.set_start(pressure=pressure,
+                                         timeout=self.cmd_timeout)
             except Exception as e:
                 self.log.warning(f"Failed to set pressure for {mirror} @ "
                                  f"AzEl: {azimuth}/{elevation}")
                 self.log.exception(e)
                 raise e
             finally:
-                evt_end_attr.put(end_topic)
+                evt_end_attr.set_put(azimuth=azimuth,
+                                     elevation=elevation,
+                                     pressure=pressure)
                 # correction completed... flip bit on detailedState
                 self.detailed_state = self.detailed_state ^ status_bit
 
@@ -787,7 +923,7 @@ class ATAOS(ConfigurableCsc):
             self.log.debug(f"Moving hexapod axis {axis}")
 
             status_bit = DetailedState.HEXAPOD
-            cmd_attr = getattr(self.hexapod, f"cmd_moveToPosition")
+
             evt_start_attr = getattr(self, f"evt_hexapodCorrectionStarted")
             evt_end_attr = getattr(self, f"evt_hexapodCorrectionCompleted")
 
@@ -798,38 +934,57 @@ class ATAOS(ConfigurableCsc):
 
             self.detailed_state = self.detailed_state ^ status_bit
 
-            cmd_topic = cmd_attr.DataType()
-            (cmd_topic.x, cmd_topic.y, cmd_topic.z,
-             cmd_topic.u, cmd_topic.v, cmd_topic.w) = self.model.get_correction_hexapod(azimuth,
-                                                                                        elevation)
+            hexapod = dict(zip([f'hexapod_{ax}' for ax in 'xyzuvw'],
+                               self.model.get_correction_hexapod(azimuth, elevation)))
 
-            start_topic = evt_start_attr.DataType()
-            start_topic.azimuth = azimuth
-            start_topic.elevation = elevation
+            hexapod_mov = dict(zip('xyzuvw',
+                                   self.model.get_correction_hexapod(azimuth, elevation)))
 
-            end_topic = evt_end_attr.DataType()
-            end_topic.azimuth = azimuth
-            end_topic.elevation = elevation
+            apply_correction = False
 
-            for ax in axis:
-                if axis == f"z":
-                    setattr(start_topic, f'focus', getattr(cmd_topic, ax))
-                    setattr(end_topic, f'focus', getattr(cmd_topic, ax))
+            for axis in hexapod_mov:
+                if axis == "w":
+                    continue
+                current = self.current_positions[axis]
+                tolerance = self.correction_tolerance[axis]
+                set_value = hexapod_mov[axis]
+
+                if current is not None and \
+                        tolerance is not None and \
+                        tolerance > 0. and \
+                        np.abs(current - set_value) < tolerance:
+                    self.log.debug(f"Set value ({set_value}) and current value ({current}) "
+                                   f"inside tolerance ({tolerance}) fox axis {axis}. Ignoring.")
+                    continue
                 else:
-                    setattr(start_topic, f'hexapod_{ax}', getattr(cmd_topic, ax))
-                    setattr(end_topic, f'hexapod_{ax}', getattr(cmd_topic, ax))
+                    self.log.debug(f"Set value for axis {axis} above threshold. Apply correction.")
+                    apply_correction = True
+                    break
 
-            evt_start_attr.put(start_topic)
+            if not apply_correction:
+                self.log.debug("All hexapod corrections inside tolerance. Skipping...")
+                return
+
+            evt_start_attr.set(elevation=elevation,
+                               azimuth=azimuth,
+                               **hexapod)
+
+            evt_end_attr.set(elevation=elevation,
+                             azimuth=azimuth,
+                             **hexapod)
+
+            evt_start_attr.put()
+
             try:
-                await cmd_attr.start(cmd_topic,
-                                     timeout=self.cmd_timeout)
+                await self.hexapod.cmd_moveToPosition.set_start(**hexapod_mov,
+                                                                timeout=self.cmd_timeout)
             except Exception as e:
                 self.log.warning(f"Failed to set hexapod position @ "
                                  f"AzEl: {azimuth}/{elevation}")
                 self.log.exception(e)
                 raise e
             finally:
-                evt_end_attr.put(end_topic)
+                evt_end_attr.put()
                 # correction completed... flip bit on detailedState
                 self.detailed_state = self.detailed_state ^ status_bit
 
@@ -881,6 +1036,10 @@ class ATAOS(ConfigurableCsc):
                 setattr(self.model, key, getattr(config, key))
             else:
                 setattr(self.model, key, [0.])
+
+        if hasattr(config, "correction_tolerance"):
+            for key in config.correction_tolerance:
+                self.correction_tolerance[key] = config.correction_tolerance[key]
 
     async def check_atpneumatic(self):
         """Check that the main and instrument valves on ATPneumatics are open.
