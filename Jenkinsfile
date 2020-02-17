@@ -2,8 +2,9 @@ pipeline {
     agent any
     environment {
         container_name = "c_${BUILD_ID}_${JENKINS_NODE_COOKIE}"
-        image_tag = "sal_v4.0.0_salobj_v5.0.0"
+        image_tag = "master"
         user_ci = credentials('lsst-io')
+        work_branches = "${GIT_BRANCH} ${CHANGE_BRANCH} develop"
     }
 
     stages {
@@ -11,7 +12,7 @@ pipeline {
             steps {
                 script {
                     sh """
-                    docker pull lsstts/develop-env:\${image_tag}
+                    docker pull lsstts/salobj:\${image_tag}
                     """
                 }
             }
@@ -29,7 +30,25 @@ pipeline {
             steps {
                 script {
                     sh """
-                    container=\$(docker run -v \${WORKSPACE}:/home/saluser/repo/ -td --rm --name \${container_name} -e LTD_USERNAME=\${user_ci_USR} -e LTD_PASSWORD=\${user_ci_PSW} lsstts/develop-env:\${image_tag})
+                    container=\$(docker run -v \${WORKSPACE}:/home/saluser/repo/ -td --rm --name \${container_name} -e LTD_USERNAME=\${user_ci_USR} -e LTD_PASSWORD=\${user_ci_PSW} lsstts/salobj:\${image_tag})
+                    """
+                }
+            }
+        }
+        stage("Clone/Setup configuration repo") {
+            steps {
+                script {
+                    sh """
+                    docker exec -u saluser \${container_name} sh -c \"source ~/.setup.sh && cd /home/saluser/repos/ && git clone https://github.com/lsst-ts/ts_config_attcs.git && cd /home/saluser/repos/ts_config_attcs && /home/saluser/.checkout_repo.sh \${work_branches} && eups declare -r . -t saluser\"
+                    """
+                }
+            }
+        }
+        stage("Checkout xml") {
+            steps {
+                script {
+                    sh """
+                    docker exec -u saluser \${container_name} sh -c \"source ~/.setup.sh && cd /home/saluser/repos/ts_xml && /home/saluser/.checkout_repo.sh \${work_branches}\"
                     """
                 }
             }
