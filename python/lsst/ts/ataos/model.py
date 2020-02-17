@@ -23,6 +23,15 @@ class Model:
                        'hexapod_v': [0.0]
                        }
 
+        self.offset = {'m1': 0.0,
+                       'm2': 0.0,
+                       'x': 0.0,
+                       'y': 0.0,
+                       'z': 0.0,
+                       'u': 0.0,
+                       'v': 0.0
+                       }
+
         self.poly_m1 = np.poly1d(self.config['m1'])
         self.poly_m2 = np.poly1d(self.config['m2'])
         self.poly_x = np.poly1d(self.config['hexapod_x'])
@@ -30,6 +39,52 @@ class Model:
         self.poly_z = np.poly1d(self.config['hexapod_z'])
         self.poly_u = np.poly1d(self.config['hexapod_u'])
         self.poly_v = np.poly1d(self.config['hexapod_v'])
+
+    def reset_offset(self):
+        """ Reset all offsets to zero.
+        """
+        self.offset = {'m1': 0.0,
+                       'm2': 0.0,
+                       'x': 0.0,
+                       'y': 0.0,
+                       'z': 0.0,
+                       'u': 0.0,
+                       'v': 0.0
+                       }
+
+    def set_offset(self, axis, value):
+        """ Set offset for specified axis.
+
+        Parameters
+        ----------
+        axis: str
+            Name of the axis. One of m1, m2, x, y, z, u, v.
+        value: float
+            Offset value.
+
+        """
+        if axis in self.offset:
+            self.offset[axis] = float(value)
+        else:
+            raise RuntimeError(f"Invalid axis name '{axis}'. Must be one of "
+                               f"{self.offset.keys()}.")
+
+    def add_offset(self, axis, value):
+        """ Set offset for specified axis.
+
+        Parameters
+        ----------
+        axis: str
+            Name of the axis. One of m1, m2, x, y, z, u, v.
+        value: float
+            Offset value.
+
+        """
+        if axis in self.offset:
+            self.offset[axis] += float(value)
+        else:
+            raise RuntimeError(f"Invalid axis name '{axis}'. Must be one of "
+                               f"{self.offset.keys()}.")
 
     def get_correction_m1(self, azimuth, elevation, temperature=None):
         """Correction for m1 support pressure.
@@ -48,7 +103,7 @@ class Model:
         pressure : float
             Pressure to apply (Pascal).
         """
-        return self.poly_m1(np.cos(np.radians(90. - elevation)))
+        return self.poly_m1(np.cos(np.radians(90. - elevation))) + self.offset['m1']
 
     def get_correction_m2(self, azimuth, elevation, temperature=None):
         """Correction for m2 support pressure.
@@ -67,7 +122,7 @@ class Model:
         pressure : float
             Pressure to apply (Pascal).
         """
-        return self.poly_m2(np.cos(np.radians(90. - elevation)))
+        return self.poly_m2(np.cos(np.radians(90. - elevation))) + self.offset['m2']
 
     def get_correction_hexapod(self, azimuth, elevation, temperature=None):
         """Correction for hexapod position.
@@ -94,13 +149,13 @@ class Model:
         v : float
             rotation angle with respect to y-axis (degrees)
         w : float
-            rotation angle with respect to z-axis (degrees)
+            [DISABLED] rotation angle with respect to z-axis (degrees)
         """
-        x = self.poly_x(np.cos(np.radians(90. - elevation)))
-        y = self.poly_y(np.cos(np.radians(90. - elevation)))
-        z = self.poly_z(np.cos(np.radians(90. - elevation)))
-        u = self.poly_u(np.cos(np.radians(90. - elevation)))
-        v = self.poly_v(np.cos(np.radians(90. - elevation)))
+        x = self.poly_x(np.cos(np.radians(90. - elevation))) + self.offset['x']
+        y = self.poly_y(np.cos(np.radians(90. - elevation))) + self.offset['y']
+        z = self.poly_z(np.cos(np.radians(90. - elevation))) + self.offset['z']
+        u = self.poly_u(np.cos(np.radians(90. - elevation))) + self.offset['u']
+        v = self.poly_v(np.cos(np.radians(90. - elevation))) + self.offset['v']
         w = 0.
 
         return x, y, z, u, v, w

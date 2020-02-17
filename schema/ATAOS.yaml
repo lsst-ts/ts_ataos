@@ -1,7 +1,7 @@
 $schema: http://json-schema.org/draft-07/schema#
 $id: https://github.com/lsst-ts/ts_ATAOS/blob/master/schema/ATAOS.yaml
 # title must end with one or more spaces followed by the schema version, which must begin with "v"
-title: ATAOS v1
+title: ATAOS v2
 description: Schema for ATAOS configuration files
 type: object
 properties:
@@ -51,3 +51,42 @@ properties:
     items:
       type: number
     default: [0.]
+  correction_tolerance:
+    description: Tolerance on the correction. If the difference between the last applied value and the current value is inside the tolerance, no correction is applied.
+    type: object
+    properties:
+      m1:
+        type: number
+        default: 0.
+        minimum: 0.
+        description: Tolerance in the M1 pressure.
+      m2:
+        type: number
+        default: 0.
+        minimum: 0.
+        description: Tolerance in the M2 pressure.
+      x:
+        type: number
+        default: 0.
+        minimum: 0.
+        description: Tolerance in hexapod x position.
+      y:
+        type: number
+        default: 0.
+        minimum: 0.
+        description: Tolerance in hexapod y position.
+      z:
+        type: number
+        default: 0.
+        minimum: 0.
+        description: Tolerance in hexapod z position.
+      u:
+        type: number
+        default: 0.
+        minimum: 0.
+        description: Tolerance in hexapod u position.
+      v:
+        type: number
+        default: 0.
+        minimum: 0.
+        description: Tolerance in hexapod v position.
