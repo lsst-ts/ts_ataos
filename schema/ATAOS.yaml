@@ -58,35 +58,35 @@ properties:
       m1:
         type: number
         default: 0.
-        exclusiveMinimum: 0.
+        minimum: 0.
         description: Tolerance in the M1 pressure.
       m2:
         type: number
         default: 0.
-        exclusiveMinimum: 0.
+        minimum: 0.
         description: Tolerance in the M2 pressure.
       x:
         type: number
         default: 0.
-        exclusiveMinimum: 0.
+        minimum: 0.
         description: Tolerance in hexapod x position.
       y:
         type: number
         default: 0.
-        exclusiveMinimum: 0.
+        minimum: 0.
         description: Tolerance in hexapod y position.
       z:
         type: number
         default: 0.
-        exclusiveMinimum: 0.
+        minimum: 0.
         description: Tolerance in hexapod z position.
       u:
         type: number
         default: 0.
-        exclusiveMinimum: 0.
+        minimum: 0.
         description: Tolerance in hexapod u position.
       v:
         type: number
         default: 0.
-        exclusiveMinimum: 0.
+        minimum: 0.
         description: Tolerance in hexapod v position.
