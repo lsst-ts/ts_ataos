@@ -1,4 +1,7 @@
-from setuptools import setup, find_namespace_packages
+import os
+import sys
+import setuptools
+import pathlib
 
 install_requires = []
 tests_require = ["pytest", "pytest-cov", "pytest-flake8", "asynctest"]
@@ -8,8 +11,11 @@ __all__ = ["__version__"]
 
 __version__ = "{version}"
 """
+tools_path = pathlib.PurePosixPath(setuptools.__path__[0])
+base_prefix = pathlib.PurePosixPath(sys.base_prefix)
+data_files_path = tools_path.relative_to(base_prefix).parents[1]
 
-setup(
+setuptools.setup(
     name="ts_ataos",
     description="Auxiliary Telescope Active Optics System.",
     use_scm_version={"write_to": "python/lsst/ts/ataos/version.py",
@@ -17,14 +23,16 @@ setup(
     setup_requires=["setuptools_scm", "pytest-runner"],
     install_requires=install_requires,
     package_dir={"": "python"},
-    packages=find_namespace_packages(where="python"),
+    packages=setuptools.find_namespace_packages(where="python"),
     package_data={"": ["*.rst", "*.yaml"]},
+    data_files=[(os.path.join(data_files_path, "schema"),
+                 ["schema/ATAOS.yaml"])],
     scripts=["bin.src/ataos_csc.py"],
     tests_require=tests_require,
     extras_require={"dev": dev_requires},
     license="GPL",
     project_urls={
         "Bug Tracker": "https://jira.lsstcorp.org/secure/Dashboard.jspa",
-        "Source Code": "https://github.com/lsst-ts/ts_ataos",
+        "Source Code": "https://github.com/lsst-ts/ts_ATAOS",
     }
 )
