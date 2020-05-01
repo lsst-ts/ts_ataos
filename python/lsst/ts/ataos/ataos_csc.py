@@ -43,7 +43,7 @@ class DetailedState(enum.IntEnum):
     M1 = 1 << 1  # Correction to M1 pressure running
     M2 = 1 << 2  # Correction to M2 pressure running
     HEXAPOD = 1 << 3  # Hexapod correction running
-    FOCUS = 1 << 4  # Focus correction running
+    FOCUS = 1 << 4  # Focus correction running -- NOT YET IMPLEMENTED
 
 
 class ATAOS(ConfigurableCsc):
@@ -102,6 +102,8 @@ class ATAOS(ConfigurableCsc):
 
         self.hexapod = Remote(self.domain, "ATHexapod", include=["moveToPosition", "positionUpdate"])
         self.camera = Remote(self.domain, "ATCamera", include=["shutterDetailedState"])
+        self.atspectrograph = Remote(self.domain, "ATSpectrograph",
+                                     include=["reportedFilterPosition", "reportedDisperserPosition"])
 
         self.pneumatics_summary_state = None
         self.pneumatics_main_valve_state = None
@@ -115,17 +117,21 @@ class ATAOS(ConfigurableCsc):
         self.azimuth = None
         self.elevation = None
 
-        # Add required callbacks
+        # Add required callbacks for ATCamera
         self.camera.evt_shutterDetailedState.callback = self.shutter_monitor_callback
+        # Add required callbacks for ATSpectrograph filter/disperser events
+        self.atspectrograph.evt_reportedFilterPosition.callback = self.latiss_filter_monitor_callback
+        self.atspectrograph.evt_reportedDisperserPosition.callback = self.latiss_disperser_monitor_callback
 
         # Corrections
         self.valid_corrections = ('enableAll', 'disableAll', 'm1', 'm2', 'hexapod', 'focus',
-                                  'moveWhileExposing')
+                                  'latiss', 'moveWhileExposing')
 
         self.corrections = {'m1': False,
                             'm2': False,
                             'hexapod': False,
                             'focus': False,
+                            'latiss': False
                             }
 
         self.current_positions = {'m1': None,
@@ -152,8 +158,10 @@ class ATAOS(ConfigurableCsc):
                                      }
 
         # Note that focus is not part of corrections routines, focus correction
-        # is performed by the hexapod. A different logic is used when focus
-        # only correction is requested.
+        # as a function of azimuth/elevation/temperature is performed by the hexapod correction.
+        # A different logic is used when focus only correction is requested.
+        # Correction for the latiss setup is only performed when an event is received
+        # from ATSpectrograph saying the filter and/or grating has changed
         self.corrections_routines = {'m1': self.set_pressure_m1,
                                      'm2': self.set_pressure_m2,
                                      'hexapod': self.set_hexapod
@@ -302,7 +310,10 @@ class ATAOS(ConfigurableCsc):
         """
         # Flush event queue to make sure only current values are accounted for!
         self.mcs.evt_target.flush()
-        self.mcs.evt_target.callback = self.update_target_position_callback
+#        self.mcs.evt_target.
+#
+#
+#        = self.update_target_position_callback
         self.mcs.tel_mount_AzEl_Encoders.callback = self.update_mount_position_callback
         self.evt_correctionOffsets.set_put(**self.model.offset,
                                            force_output=True)
@@ -343,7 +354,7 @@ class ATAOS(ConfigurableCsc):
         self.detailed_state = 0
 
     async def do_applyCorrection(self, id_data):
-        """Apply correction on all components either for the current position
+        """Apply correction based on model (LUTs) on all components either for the current position
         of the telescope (default) or the specified position.
 
         Since SAL does not allow definition of default parameters,
@@ -387,6 +398,7 @@ class ATAOS(ConfigurableCsc):
 
         self.log.debug("Apply correction Hexapod")
         await self.set_hexapod(azimuth, elevation)
+
         self.log.debug("Apply correction M1")
         await self.set_pressure("m1", azimuth, elevation,
                                 self.model.get_correction_m1(azimuth,
@@ -595,6 +607,16 @@ class ATAOS(ConfigurableCsc):
         """
         self.assert_enabled('setFocus')
 
+    async def do_setWavelength(self, id_data):
+        """Set wavelength to optimize focus.
+
+        Parameters
+        ----------
+        id_data : `CommandIdData`
+            Command ID and data
+        """
+        self.assert_enabled('setWavelength')
+
     async def health_monitor(self):
         """Monitor general health of component. Transition publish `errorCode`
         and transition to FAULT state if anything bad happens.
@@ -624,7 +646,9 @@ class ATAOS(ConfigurableCsc):
                                        f"el: {self.elevation}, target_el: {self.target_elevation}, "
                                        f"corr_el: {elevation}")
 
+                    # corrections contains m1, m2, hexapod, focus
                     for correction in self.corrections:
+                        # corrections_routines only has m1, m2 and hexapod, NOT FOCUS
                         if self.corrections[correction] and correction in self.corrections_routines:
                             self.log.debug(f"Adding {correction} correction.")
                             corrections_to_apply.append(
@@ -770,10 +794,33 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        data : `SALPY_ATCamera.ATCamera_logevent_shutterDetailedStateC`
+        data : `ATCamera.ATCamera_logevent_shutterDetailedStateC`
             Command ID and data
         """
         self.camera_exposing = data.substate != ShutterState.CLOSED
+
+    def latiss_filter_monitor_callback(self, data):
+        """A callback function to monitor the latiss filter/grating.
+
+        Parameters
+        ----------
+        data : `ATSpectrograph.ATSpectrograph_logevent_reportedFilterPosition`
+            Command ID and data
+        """
+        self.latiss_filter_name = data.name
+        self.latiss_filter_focus_offset = data.focusOffset
+        self.latiss_filter_central_wavelength = data.centralWavelength
+
+    def latiss_disperser_monitor_callback(self, data):
+        """A callback function to monitor the latiss filter/grating.
+
+        Parameters
+        ----------
+        data : `ATSpectrograph.ATSpectrograph_logevent_reportedDisperserPosition`
+            Command ID and data
+        """
+        self.latiss_filter_name = data.name
+        self.latiss_disperser_focus_offset = data.focusOffset
 
     def hexapod_monitor_callback(self, data):
         """A callback function to monitor position updates on the hexapod.
