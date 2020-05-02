@@ -12,9 +12,15 @@ from lsst.ts.ataos import ataos_csc
 
 from lsst.ts.idl.enums import ATPneumatics
 
-np.random.seed(47)
+#np.random.seed(47)
 
 index_gen = salobj.index_generator()
+
+# tried this one too...
+# stream_handler = logging.StreamHandler(sys.stdout)
+# logger = logging.getLogger()
+# logger.addHandler(stream_handler)
+# logger.level = logging.DEBUG
 
 logger = logging.getLogger()
 logger.level = logging.DEBUG
@@ -37,6 +43,7 @@ class Harness:
         self.pnematics = salobj.Controller("ATPneumatics")
         self.hexapod = salobj.Controller("ATHexapod")
         self.camera = salobj.Controller("ATCamera")
+        self.atspectrograph = salobj.Controller("ATSpectrograph")
 
     async def __aenter__(self):
         await asyncio.gather(self.csc.start_task,
@@ -44,7 +51,8 @@ class Harness:
                              self.atmcs.start_task,
                              self.pnematics.start_task,
                              self.hexapod.start_task,
-                             self.camera.start_task)
+                             self.camera.start_task,
+                             self.atspectrograph.start_task)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -53,7 +61,8 @@ class Harness:
                              self.atmcs.close(),
                              self.pnematics.close(),
                              self.hexapod.close(),
-                             self.camera.close())
+                             self.camera.close(),
+                             self.atspectrograph.close())
 
 
 class TestCSC(unittest.TestCase):
@@ -80,8 +89,8 @@ class TestCSC(unittest.TestCase):
             extra_commands = ("applyCorrection",
                               "applyFocusOffset",
                               "disableCorrection",
-                              "enableCorrection",
-                              "setFocus")
+                              "enableCorrection")
+#                              "setFocus")
 
             async with Harness() as harness:
 
@@ -169,7 +178,9 @@ class TestCSC(unittest.TestCase):
 
     def test_applyCorrection(self):
         """Test applyCorrection command. """
-
+        print('test_applyCorrection started - print statement ')
+        logger.debug('test_applyCorrection started - debug')
+        self.log.debug('test_applyCorrection started - self.log.debug')
         async def doit(get_tel_pos=True, while_exposing=False):
 
             async with Harness() as harness:
@@ -208,6 +219,8 @@ class TestCSC(unittest.TestCase):
                 harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
                 harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
+                harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+
                 # FIXME: Check if this is correct! Is there a difference in
                 # command to move hexapod and focus or they will use the same
                 # command?
@@ -218,9 +231,12 @@ class TestCSC(unittest.TestCase):
 
                 timeout = 40. * salobj.base_csc.HEARTBEAT_INTERVAL
                 # Enable the CSC
+                logger.debug('Enabling ataos')
+                print('test_csc - Enabling ataos')
                 await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
-
+                logger.debug('Enabled ataos')
+                print('test_csc - Enabled ataos')
                 # Check that applyCorrection fails if enable Correction is on
                 harness.aos_remote.cmd_enableCorrection.set(m1=True)
                 await harness.aos_remote.cmd_enableCorrection.start(timeout=timeout)
@@ -434,6 +450,9 @@ class TestCSC(unittest.TestCase):
                 harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
                 harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
+                # TODO: Why do I need this?
+                harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+
                 cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
 
                 timeout = 5 * salobj.base_csc.HEARTBEAT_INTERVAL
@@ -556,9 +575,9 @@ class TestCSC(unittest.TestCase):
 
         asyncio.get_event_loop().run_until_complete(doit())
 
-    def test_setFocus(self):
-        """Test setFocus"""
-        pass
+    # def test_setFocus(self):
+    #     """Test setFocus"""
+    #     pass
 
 
 if __name__ == '__main__':

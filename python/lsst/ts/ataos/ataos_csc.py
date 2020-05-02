@@ -103,7 +103,9 @@ class ATAOS(ConfigurableCsc):
         self.hexapod = Remote(self.domain, "ATHexapod", include=["moveToPosition", "positionUpdate"])
         self.camera = Remote(self.domain, "ATCamera", include=["shutterDetailedState"])
         self.atspectrograph = Remote(self.domain, "ATSpectrograph",
-                                     include=["reportedFilterPosition", "reportedDisperserPosition"])
+                                     include=["summaryState",
+                                              "reportedFilterPosition",
+                                              "reportedDisperserPosition"])
 
         self.pneumatics_summary_state = None
         self.pneumatics_main_valve_state = None
@@ -117,21 +119,28 @@ class ATAOS(ConfigurableCsc):
         self.azimuth = None
         self.elevation = None
 
+        self.atspectrograph_summary_state = None
+        self.current_atspectrograph_filter_central_wavelength = None
+        self.current_atspectrograph_filter_name = None
+        self.current_atspectrograph_filter_focus_offset = None
+        self.current_atspectrograph_disperser_name = None
+        self.current_atspectrograph_disperser_focus_offset = None
+
         # Add required callbacks for ATCamera
         self.camera.evt_shutterDetailedState.callback = self.shutter_monitor_callback
         # Add required callbacks for ATSpectrograph filter/disperser events
-        self.atspectrograph.evt_reportedFilterPosition.callback = self.latiss_filter_monitor_callback
-        self.atspectrograph.evt_reportedDisperserPosition.callback = self.latiss_disperser_monitor_callback
+        self.atspectrograph.evt_reportedFilterPosition.callback = self.atspectrograph_filter_monitor_callback
+        self.atspectrograph.evt_reportedDisperserPosition.callback = self.atspectrograph_disperser_monitor_callback
 
         # Corrections
         self.valid_corrections = ('enableAll', 'disableAll', 'm1', 'm2', 'hexapod', 'focus',
-                                  'latiss', 'moveWhileExposing')
+                                  'atspectrograph', 'moveWhileExposing')
 
         self.corrections = {'m1': False,
                             'm2': False,
                             'hexapod': False,
                             'focus': False,
-                            'latiss': False
+                            'atspectrograph': False
                             }
 
         self.current_positions = {'m1': None,
@@ -160,7 +169,7 @@ class ATAOS(ConfigurableCsc):
         # Note that focus is not part of corrections routines, focus correction
         # as a function of azimuth/elevation/temperature is performed by the hexapod correction.
         # A different logic is used when focus only correction is requested.
-        # Correction for the latiss setup is only performed when an event is received
+        # Correction for the atspectrograph setup is only performed when an event is received
         # from ATSpectrograph saying the filter and/or grating has changed
         self.corrections_routines = {'m1': self.set_pressure_m1,
                                      'm2': self.set_pressure_m2,
@@ -295,6 +304,24 @@ class ATAOS(ConfigurableCsc):
             # set callback to monitor m2 valve state from now on...
             self.pneumatics.evt_m2State.callback = self.pneumatics_m2s_callback
 
+        if self.atspectrograph_summary_state is None:
+            try:
+                await self.atspectrograph.evt_summaryState.next(flush=False,
+                                                            timeout=self.fast_timeout)
+            except asyncio.TimeoutError:
+                self.log.warning("Could not get summary state from ATSpectrograph.")
+
+            # Trick to get last value, until aget is available.
+            ss = self.atspectrograph.evt_summaryState.get()
+            if ss is not None:
+                self.atspectrograph_summary_state = State(ss.summaryState)
+
+            print("Got summary state from ATSpectrograph. - as print message to stdout")
+            self.log.debug("Got summary state from ATSpectrograph. - as debug message")
+            # set callback to monitor summary state from now on...
+            self.atspectrograph.evt_summaryState.callback = self.atspectrograph_ss_callback
+            print("Started ss callback for atspectrograph.")
+
         await super().begin_start(data)
 
     async def end_enable(self, id_data):
@@ -308,6 +335,8 @@ class ATAOS(ConfigurableCsc):
         id_data : `CommandIdData`
             Command ID and data
         """
+
+        self.log.debug('At beginning ofj end_enable')
         # Flush event queue to make sure only current values are accounted for!
         self.mcs.evt_target.flush()
 #        self.mcs.evt_target.
@@ -318,6 +347,7 @@ class ATAOS(ConfigurableCsc):
         self.evt_correctionOffsets.set_put(**self.model.offset,
                                            force_output=True)
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
+
 
     async def end_disable(self, id_data):
         """End do_disable; called after state changes but before command
@@ -331,6 +361,7 @@ class ATAOS(ConfigurableCsc):
             Command ID and data
         """
 
+        self.log.debug('At beginning of end_disable')
         self.mcs.evt_target.callback = None
         self.target_elevation = None
         self.target_azimuth = None
@@ -419,7 +450,6 @@ class ATAOS(ConfigurableCsc):
     async def do_applyFocusOffset(self, id_data):
         """Adds a focus offset to the focus correction. Same as apply focus
          but do the math...
-
         Parameters
         ----------
         id_data : `CommandIdData`
@@ -430,7 +460,7 @@ class ATAOS(ConfigurableCsc):
         self.model.set_offset("z", id_data.offset)
 
     async def do_applyAxisOffset(self, id_data):
-        """Adds offset to selected axis correction.
+        """Adds offset to selected model axis correction.
 
         Parameters
         ----------
@@ -445,7 +475,7 @@ class ATAOS(ConfigurableCsc):
                                            force_output=True)
 
     async def do_offset(self, data):
-        """Apply offsets to all axis.
+        """Apply relative offsets to any axis of the model (m1, m2, and hexapod x,y,z,u,v,w).
 
         Offsets are cumulative, e.g. if the command is sent twice, with the
         same values you will get double the amount of offset.
@@ -554,6 +584,27 @@ class ATAOS(ConfigurableCsc):
             self.log.exception(e)
             raise e
 
+        # try:
+        #     if id_data.atspectrograph or id_data.enableAll:
+        #         await self.check_atspectrograph()
+        #         try:
+        #             if self.pneumatics_m2_state != ATPneumatics.AirValveState.OPENED:
+        #                 await self.pneumatics.cmd_m2OpenAirValve.start(timeout=self.cmd_timeout)
+        #         except AckError as e:
+        #             if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
+        #                 self.log.warning("M2 valve is already opened.")
+        #                 self.log.exception(e)
+        #             else:
+        #                 raise e
+        #         # Set pressure to zero.
+        #
+        #         await self.pneumatics.cmd_m2SetPressure.set_start(pressure=0.,
+        #                                                           timeout=self.cmd_timeout)
+        except Exception as e:
+            self.log.error("Failed to open m2 air valve.")
+            self.log.exception(e)
+            raise e
+
         self.mark_corrections(id_data, True)
         await asyncio.sleep(0.)  # give control back to event loop
         self.publish_enable_corrections()
@@ -597,15 +648,16 @@ class ATAOS(ConfigurableCsc):
         await asyncio.sleep(0.)  # give control back to event loop
         self.publish_enable_corrections()
 
-    async def do_setFocus(self, id_data):
-        """Set focus position.
-
-        Parameters
-        ----------
-        id_data : `CommandIdData`
-            Command ID and data
-        """
-        self.assert_enabled('setFocus')
+    # async def do_setFocus(self, id_data):
+    #     # TODO: IS this used??? I think it's just added confusion and should be removed from XML
+    #     """Set focus position.
+    #
+    #     Parameters
+    #     ----------
+    #     id_data : `CommandIdData`
+    #         Command ID and data
+    #     """
+    #     self.assert_enabled('setFocus')
 
     async def do_setWavelength(self, id_data):
         """Set wavelength to optimize focus.
@@ -799,28 +851,48 @@ class ATAOS(ConfigurableCsc):
         """
         self.camera_exposing = data.substate != ShutterState.CLOSED
 
-    def latiss_filter_monitor_callback(self, data):
-        """A callback function to monitor the latiss filter/grating.
+    def atspectrograph_filter_monitor_callback(self, data):
+        """A callback function to monitor the atspectrograph filter/grating.
 
         Parameters
         ----------
         data : `ATSpectrograph.ATSpectrograph_logevent_reportedFilterPosition`
             Command ID and data
         """
-        self.latiss_filter_name = data.name
-        self.latiss_filter_focus_offset = data.focusOffset
-        self.latiss_filter_central_wavelength = data.centralWavelength
 
-    def latiss_disperser_monitor_callback(self, data):
-        """A callback function to monitor the latiss filter/grating.
+        if self.corrections['atspectrograph']:
+            # Apply offsets to model
+            # Offsets are absolute values, so need to subtract offset already in place
+            offset_to_apply = data.focusOffset - self.current_atspectrograph_filter_focus_offset
+            self.model.set_offset("z", offset_to_apply)
+
+            self.log.debug(f"atspectrograph changed filters from {self.current_atspectrograph_filter_name} to {data.name}")
+            self.log.debug(f"Calculated and hexapod-z model offset of {data.offset} "
+                           f"based on focus differences between filters")
+
+            self.current_atspectrograph_filter_name = data.name
+            self.current_atspectrograph_filter_focus_offset = data.focusOffset
+            self.current_atspectrograph_filter_central_wavelength = data.centralWavelength
+
+
+    def atspectrograph_disperser_monitor_callback(self, data):
+        """A callback function to monitor the atspectrograph filter/grating.
 
         Parameters
         ----------
         data : `ATSpectrograph.ATSpectrograph_logevent_reportedDisperserPosition`
             Command ID and data
         """
-        self.latiss_filter_name = data.name
-        self.latiss_disperser_focus_offset = data.focusOffset
+        if self.corrections['atspectrograph']:
+            offset_to_apply = data.focusOffset - self.current_atspectrograph_disperser_focus_offset
+            self.model.set_offset("z", offset_to_apply)
+
+            self.log.debug(f"atspectrograph changed dispersers from {self.current_atspectrograph_disperser_name} to {data.name}")
+            self.log.debug(f"Calculated and hexapod-z model offset of {data.offset} "
+                           f"based on focus differences between dispersers")
+
+            self.current_atspectrograph_disperser_name = data.name
+            self.current_atspectrograph_disperser_focus_offset = data.focusOffset
 
     def hexapod_monitor_callback(self, data):
         """A callback function to monitor position updates on the hexapod.
@@ -945,7 +1017,9 @@ class ATAOS(ConfigurableCsc):
                 self.detailed_state = self.detailed_state ^ status_bit
 
     async def set_focus(self, azimuth, elevation):
-        """Utility to set focus position.
+        """Utility to set focus position manually.
+        # TODO: Will get overridden if correction loop is on!
+        # Does this get used ?!
 
         Parameters
         ----------
@@ -1087,6 +1161,24 @@ class ATAOS(ConfigurableCsc):
         if hasattr(config, "correction_tolerance"):
             for key in config.correction_tolerance:
                 self.correction_tolerance[key] = config.correction_tolerance[key]
+
+    def atspectrograph_ss_callback(self, data):
+        """Callback to monitor summary state from atspectrograph.
+
+        Parameters
+        ----------
+        data
+
+        """
+        self.atspectrograph_summary_state = State(data.summaryState)
+
+    async def check_atspectrograph(self):
+        """ Check that the atspectrograph is online and enabled"""
+        if self.atspectrograph_summary_state != State.ENABLED:
+            raise RuntimeError(f"ATSpectrograph (LATISS) in {self.atspectrograph_summary_state}. "
+                               f"Expected {State.ENABLED}. Enable CSC before "
+                               f"activating corrections.")
+
 
     async def check_atpneumatic(self):
         """Check that the main and instrument valves on ATPneumatics are open.
