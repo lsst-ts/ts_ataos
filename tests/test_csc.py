@@ -5,6 +5,7 @@ import asyncio
 import numpy as np
 import logging
 import pathlib
+# import pytest
 
 from lsst.ts import salobj
 
@@ -12,17 +13,12 @@ from lsst.ts.ataos import ataos_csc
 
 from lsst.ts.idl.enums import ATPneumatics
 
-#np.random.seed(47)
+# np.random.seed(47)
 
 index_gen = salobj.index_generator()
 
-# tried this one too...
-# stream_handler = logging.StreamHandler(sys.stdout)
-# logger = logging.getLogger()
-# logger.addHandler(stream_handler)
-# logger.level = logging.DEBUG
-
-logger = logging.getLogger()
+logging.basicConfig()
+logger = logging.getLogger(__name__)
 logger.level = logging.DEBUG
 
 STD_TIMEOUT = 5  # standard command timeout (sec)
@@ -66,6 +62,8 @@ class Harness:
 
 
 class TestCSC(unittest.TestCase):
+
+    # @pytest.mark.skip(reason="SKIPPING test_standard_state_transitions DUE TO SPEED/LOGGING ISSUES")
 
     def test_standard_state_transitions(self):
         """Test standard CSC state transitions.
@@ -178,9 +176,7 @@ class TestCSC(unittest.TestCase):
 
     def test_applyCorrection(self):
         """Test applyCorrection command. """
-        print('test_applyCorrection started - print statement ')
-        logger.debug('test_applyCorrection started - debug')
-        self.log.debug('test_applyCorrection started - self.log.debug')
+
         async def doit(get_tel_pos=True, while_exposing=False):
 
             async with Harness() as harness:
@@ -232,12 +228,12 @@ class TestCSC(unittest.TestCase):
                 timeout = 40. * salobj.base_csc.HEARTBEAT_INTERVAL
                 # Enable the CSC
                 logger.debug('Enabling ataos')
-                print('test_csc - Enabling ataos')
                 await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
                 logger.debug('Enabled ataos')
-                print('test_csc - Enabled ataos')
+
                 # Check that applyCorrection fails if enable Correction is on
+                logger.debug('Check that applyCorrection fails if enable Correction is on')
                 harness.aos_remote.cmd_enableCorrection.set(m1=True)
                 await harness.aos_remote.cmd_enableCorrection.start(timeout=timeout)
 
@@ -245,6 +241,7 @@ class TestCSC(unittest.TestCase):
                     await harness.aos_remote.cmd_applyCorrection.start(timeout=timeout)
 
                 # Switch corrections off
+                logger.debug('Switch corrections off')
                 harness.aos_remote.cmd_disableCorrection.set(disableAll=True)
                 await harness.aos_remote.cmd_disableCorrection.start(timeout=timeout)
 
@@ -263,6 +260,7 @@ class TestCSC(unittest.TestCase):
                                                                                      timeout=timeout)
 
                 # Send applyCorrection command
+                logger.debug('Send applyCorrection command')
                 azimuth = np.random.uniform(0., 360.)
                 # make sure it is never zero because np.random.uniform is [min, max)
                 elevation = 90. - np.random.uniform(0., 90.)
@@ -281,6 +279,7 @@ class TestCSC(unittest.TestCase):
                 await publish_mountEnconders()
 
                 # Test that the hexapod won't move if there's an exposure happening
+                logger.debug("Test that the hexapod won't move if there's an exposure happening")
                 if while_exposing:
                     shutter_state_topic = harness.camera.evt_shutterDetailedState.DataType()
                     shutter_state_topic.substate = ataos_csc.ShutterState.OPEN
@@ -301,6 +300,7 @@ class TestCSC(unittest.TestCase):
                 await asyncio.sleep(5*salobj.base_csc.HEARTBEAT_INTERVAL)
 
                 # Check that callbacks where called
+                logger.debug("Check that callbacks where called")
                 harness.pnematics.cmd_m1SetPressure.callback.assert_called()
                 harness.pnematics.cmd_m2SetPressure.callback.assert_called()
                 if while_exposing:
@@ -344,18 +344,23 @@ class TestCSC(unittest.TestCase):
                 )
 
                 # disable CSC
+                logger.debug("Disable CSC")
                 await harness.aos_remote.cmd_disable.start(timeout=timeout)
 
         # Run test getting the telescope position
         asyncio.get_event_loop().run_until_complete(doit(get_tel_pos=True))
+        logger.debug("test getting the telescope position - COMPLETE")
 
         # Run test getting the telescope position while exposing
         asyncio.get_event_loop().run_until_complete(doit(get_tel_pos=True,
                                                          while_exposing=True))
+        logger.debug("Run test getting the telescope position while exposing - COMPLETE")
 
         # Run for specified location
         asyncio.get_event_loop().run_until_complete(doit(get_tel_pos=False))
+        logger.debug("Run for specified location - COMPLETE")
 
+    # @pytest.mark.skip(reason="SKIPPING test_offsets DUE TO SPEED/LOGGING ISSUES")
     def test_offsets(self):
         """Test applyFocusOffset command."""
 
@@ -363,7 +368,9 @@ class TestCSC(unittest.TestCase):
 
             async with Harness() as harness:
 
-                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED)
+                # if there is nothing (atpneumatics/atspectrograph) sending events then this command times out
+                # need to extend the timeout in this case.
+                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=60)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
                 offset_init = await harness.aos_remote.evt_correctionOffsets.next(
@@ -411,6 +418,7 @@ class TestCSC(unittest.TestCase):
 
         asyncio.get_event_loop().run_until_complete(doit())
 
+    # @pytest.mark.skip(reason="SKIPPING test_enable_disable_corrections DUE TO SPEED/LOGGING ISSUES")
     def test_enable_disable_corrections(self):
         """Test enableCorrection"""
 
@@ -418,8 +426,7 @@ class TestCSC(unittest.TestCase):
 
             async with Harness() as harness:
 
-                # Enable the CSC
-                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED)
+                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=60)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
                 def callback(data):
@@ -450,7 +457,6 @@ class TestCSC(unittest.TestCase):
                 harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
                 harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
-                # TODO: Why do I need this?
                 harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
 
                 cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
@@ -458,6 +464,7 @@ class TestCSC(unittest.TestCase):
                 timeout = 5 * salobj.base_csc.HEARTBEAT_INTERVAL
 
                 # Try to send empty enable correction, this will fail.
+                logger.debug('Try to send empty enable correction, this will fail.')
                 with self.assertRaises(salobj.AckError):
                     await cmd_attr.start(cmd_attr.DataType(),
                                          timeout=timeout)
@@ -467,6 +474,7 @@ class TestCSC(unittest.TestCase):
                 expected_corrections = {"m1": False, "m2": False, "hexapod": False, "focus": False,
                                         "moveWhileExposing": False}
 
+                logger.debug('Starting to loop over enabling corrections')
                 for corr in corrections:
                     send_topic = cmd_attr.DataType()
                     expected_corrections[corr] = True
@@ -573,6 +581,7 @@ class TestCSC(unittest.TestCase):
                                          f"Expected False, "
                                          f"got {getattr(receive_topic, test_corr)}")
 
+        logger.debug('Starting test_enable_disable_corrections')
         asyncio.get_event_loop().run_until_complete(doit())
 
     # def test_setFocus(self):
@@ -582,7 +591,8 @@ class TestCSC(unittest.TestCase):
 
 if __name__ == '__main__':
 
-    stream_handler = logging.StreamHandler(sys.stdout)
-    logger.addHandler(stream_handler)
+    stream_handler = logging.StreamHandler(sys.stdout)  # leave uncommented to prevent flake8 error
+    # stream_handler.setLevel(logging.DEBUG)
+    # logger.addHandler(stream_handler)
 
     unittest.main()

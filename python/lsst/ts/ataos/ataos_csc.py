@@ -19,7 +19,6 @@ CORRECTION_LOOP_DIED = 8103
 state.
 """
 
-
 class ShutterState(enum.IntEnum):
     """State constants.
 
@@ -178,7 +177,7 @@ class ATAOS(ConfigurableCsc):
 
         self._move_while_exposing = False
 
-        self.log.debug("Done")
+        self.log.debug("Done __init__")
 
     @property
     def detailed_state(self):
@@ -229,7 +228,7 @@ class ATAOS(ConfigurableCsc):
         data : `DataType`
             Command data
         """
-
+        self.log.info('At beginning of begin_start')
         if self.pneumatics_summary_state is None:
             try:
                 await self.pneumatics.evt_summaryState.next(flush=False,
@@ -306,23 +305,21 @@ class ATAOS(ConfigurableCsc):
 
         if self.atspectrograph_summary_state is None:
             try:
-                await self.atspectrograph.evt_summaryState.next(flush=False,
-                                                            timeout=self.fast_timeout)
+                await self.atspectrograph.evt_summaryState.aget(timeout=self.fast_timeout)
             except asyncio.TimeoutError:
                 self.log.warning("Could not get summary state from ATSpectrograph.")
 
-            # Trick to get last value, until aget is available.
-            ss = self.atspectrograph.evt_summaryState.get()
-            if ss is not None:
-                self.atspectrograph_summary_state = State(ss.summaryState)
+            # # Trick to get last value, until aget is available.
+            # ss = self.atspectrograph.evt_summaryState.get()
+            # if ss is not None:
+            #     self.atspectrograph_summary_state = State(ss.summaryState)
 
-            print("Got summary state from ATSpectrograph. - as print message to stdout")
-            self.log.debug("Got summary state from ATSpectrograph. - as debug message")
+
             # set callback to monitor summary state from now on...
             self.atspectrograph.evt_summaryState.callback = self.atspectrograph_ss_callback
-            print("Started ss callback for atspectrograph.")
 
         await super().begin_start(data)
+        self.log.info('Completed begin_start. - self.log.info')
 
     async def end_enable(self, id_data):
         """End do_enable; called after state changes but before command
@@ -336,18 +333,16 @@ class ATAOS(ConfigurableCsc):
             Command ID and data
         """
 
-        self.log.debug('At beginning ofj end_enable')
+        self.log.info('At beginning of end_enable')
         # Flush event queue to make sure only current values are accounted for!
         self.mcs.evt_target.flush()
-#        self.mcs.evt_target.
-#
-#
-#        = self.update_target_position_callback
+
         self.mcs.tel_mount_AzEl_Encoders.callback = self.update_mount_position_callback
         self.evt_correctionOffsets.set_put(**self.model.offset,
                                            force_output=True)
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
 
+        self.log.info('At end of end_enable, correction loop now running')
 
     async def end_disable(self, id_data):
         """End do_disable; called after state changes but before command
@@ -383,6 +378,7 @@ class ATAOS(ConfigurableCsc):
         self.mark_corrections(disable, False)
 
         self.detailed_state = 0
+        self.log.debug('At end of end_disable')
 
     async def do_applyCorrection(self, id_data):
         """Apply correction based on model (LUTs) on all components either for the current position
