@@ -104,7 +104,8 @@ class ATAOS(ConfigurableCsc):
         self.atspectrograph = Remote(self.domain, "ATSpectrograph",
                                      include=["summaryState",
                                               "reportedFilterPosition",
-                                              "reportedDisperserPosition"])
+                                              "reportedDisperserPosition",
+                                              "heartbeat"])
 
         self.pneumatics_summary_state = None
         self.pneumatics_main_valve_state = None
@@ -127,9 +128,6 @@ class ATAOS(ConfigurableCsc):
 
         # Add required callbacks for ATCamera
         self.camera.evt_shutterDetailedState.callback = self.shutter_monitor_callback
-        # Add required callbacks for ATSpectrograph filter/disperser events
-        self.atspectrograph.evt_reportedFilterPosition.callback = self.atspectrograph_filter_monitor_callback
-        self.atspectrograph.evt_reportedDisperserPosition.callback = self.atspectrograph_disperser_monitor_callback
 
         # Corrections
         self.valid_corrections = ('enableAll', 'disableAll', 'm1', 'm2', 'hexapod', 'focus',
@@ -150,6 +148,11 @@ class ATAOS(ConfigurableCsc):
                                   'u': None,
                                   'v': None
                                   }
+        self.focus_offset_per_category = {'totalFocusCorrectionOffset': 0.0,
+                                          'cumulativeUserOffset': 0.0,
+                                          'filterOffset': 0.0,
+                                          'disperserOffset':0.0,
+                                          'wavelengthOffset':0.0}
 
         # Add callback to get positions
         self.hexapod.evt_positionUpdate.callback = self.hexapod_monitor_callback
@@ -304,19 +307,30 @@ class ATAOS(ConfigurableCsc):
             self.pneumatics.evt_m2State.callback = self.pneumatics_m2s_callback
 
         if self.atspectrograph_summary_state is None:
+
             try:
                 await self.atspectrograph.evt_summaryState.aget(timeout=self.fast_timeout)
             except asyncio.TimeoutError:
                 self.log.warning("Could not get summary state from ATSpectrograph.")
 
-            # # Trick to get last value, until aget is available.
-            # ss = self.atspectrograph.evt_summaryState.get()
-            # if ss is not None:
-            #     self.atspectrograph_summary_state = State(ss.summaryState)
+            try:
+                await self.atspectrograph.evt_reportedDisperserPosition.aget(timeout=self.fast_timeout)
 
+            except asyncio.TimeoutError:
+                self.log.warning("Could not get reportedDisperserPosition from ATSpectrograph.")
 
-            # set callback to monitor summary state from now on...
-            self.atspectrograph.evt_summaryState.callback = self.atspectrograph_ss_callback
+            try:
+                await self.atspectrograph.evt_reportedFilterPosition.aget(timeout=self.fast_timeout)
+            except asyncio.TimeoutError:
+                self.log.warning("Could not get reportedFilterPosition from ATSpectrograph.")
+
+        # add offsets from spectrograph
+        # Add required callbacks for ATSpectrograph summary_state/filter/disperser events
+        # Not sure summary state is needed...
+        self.atspectrograph.evt_summaryState.callback = self.atspectrograph_ss_callback
+        self.atspectrograph.evt_reportedFilterPosition.callback = self.atspectrograph_filter_monitor_callback
+        self.atspectrograph.evt_reportedDisperserPosition.callback = self.atspectrograph_disperser_monitor_callback
+
 
         await super().begin_start(data)
         self.log.info('Completed begin_start. - self.log.info')
@@ -338,8 +352,10 @@ class ATAOS(ConfigurableCsc):
         self.mcs.evt_target.flush()
 
         self.mcs.tel_mount_AzEl_Encoders.callback = self.update_mount_position_callback
+        # sets offsets to what they are in the init file
         self.evt_correctionOffsets.set_put(**self.model.offset,
                                            force_output=True)
+
         self.correction_loop_task = asyncio.ensure_future(self.correction_loop())
 
         self.log.info('At end of end_enable, correction loop now running')
@@ -443,9 +459,9 @@ class ATAOS(ConfigurableCsc):
         #                      self.set_pressure("m2", azimuth, elevation),
         #                      )  # FIXME: What about focus? YES, do focus separately
 
-    async def do_applyFocusOffset(self, id_data):
-        """Adds a focus offset to the focus correction. Same as apply focus
-         but do the math...
+    async def do_applyFocusOffset(self, id_data, user_supplied=True):
+        """Sets the focus offset to the hexapod correction. This is *NOT* a cumulative offset.
+
         Parameters
         ----------
         id_data : `CommandIdData`
@@ -455,8 +471,17 @@ class ATAOS(ConfigurableCsc):
 
         self.model.set_offset("z", id_data.offset)
 
-    async def do_applyAxisOffset(self, id_data):
-        """Adds offset to selected model axis correction.
+        # focusOffsetSummary_vals = self.evt_focusOffsetSummary.aget()
+        # Do we want to verify that the event equals the current value?
+        # this isn't called when this routine is called when filter/disperser changes occur
+        if user_supplied:
+            self.focus_offset_per_category['totalFocusCorrectionOffset'] += id_data.offset
+            self.focus_offset_per_category['cumulativeUserOffset'] = id_data.offset
+            self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
+                                           force_output=True)
+
+    async def do_applyAxisOffset(self, id_data, user_supplied=True):
+        """Sets offset to selected model axis correction. These are *NOT* a cumulative offsets.
 
         Parameters
         ----------
@@ -469,8 +494,13 @@ class ATAOS(ConfigurableCsc):
 
         self.evt_correctionOffsets.set_put(**self.model.offset,
                                            force_output=True)
+        if user_supplied and id_data.axis =='z':
+            self.focus_offset_per_category['totalFocusCorrectionOffset'] += id_data.offset
+            self.focus_offset_per_category['cumulativeUserOffset'] = id_data.offset
+            self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
+                                           force_output=True)
 
-    async def do_offset(self, data):
+    async def do_offset(self, data, user_supplied=True):
         """Apply relative offsets to any axis of the model (m1, m2, and hexapod x,y,z,u,v,w).
 
         Offsets are cumulative, e.g. if the command is sent twice, with the
@@ -489,8 +519,14 @@ class ATAOS(ConfigurableCsc):
         self.evt_correctionOffsets.set_put(**self.model.offset,
                                            force_output=True)
 
-    async def do_resetOffset(self, data):
-        """ Reset offset on a specific axis or all.
+        if user_supplied and data.axis == 'z':
+            self.focus_offset_per_category['totalFocusCorrectionOffset'] += getattr(data, 'z')
+            self.focus_offset_per_category['cumulativeUserOffset'] += getattr(data, 'z')
+            self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
+                                           force_output=True)
+
+    async def do_resetOffset(self, data, user_supplied=True):
+        """ Reset user provided offsets on a specific axis or all. Grating/Filter offsets will remain.
 
         Parameters
         ----------
@@ -507,7 +543,21 @@ class ATAOS(ConfigurableCsc):
             raise RuntimeError(f"Axis {data.axis} invalid. Must be one of "
                                f"m1, m2, x, y, z, u, v, all or and empty string with length zero.")
 
+        # must add back in the filter/grating/wavelength offsets
+        offset_to_apply = focus_offset_per_category['filterOffset']+\
+                          focus_offset_per_category['disperserOffset']+\
+                          focus_offset_per_category['wavelengthOffset']
+
+        self.model.set_offset('z', offset_to_apply)
+
         self.evt_correctionOffsets.set_put(**self.model.offset,
+                                           force_output=True)
+
+        # Do not wipe out the filter/grating offsets!
+        if user_supplied and data.axis == 'z':
+            self.focus_offset_per_category['totalFocusCorrectionOffset'] = self.model.offset['z']
+            self.focus_offset_per_category['cumulativeUserOffset'] = offset_to_apply
+            self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                            force_output=True)
 
     async def do_enableCorrection(self, id_data):
@@ -596,6 +646,7 @@ class ATAOS(ConfigurableCsc):
         #
         #         await self.pneumatics.cmd_m2SetPressure.set_start(pressure=0.,
         #                                                           timeout=self.cmd_timeout)
+
         except Exception as e:
             self.log.error("Failed to open m2 air valve.")
             self.log.exception(e)
@@ -855,12 +906,12 @@ class ATAOS(ConfigurableCsc):
         data : `ATSpectrograph.ATSpectrograph_logevent_reportedFilterPosition`
             Command ID and data
         """
-
+        # Do not want to apply any corrections if the correction is turned off
         if self.corrections['atspectrograph']:
             # Apply offsets to model
-            # Offsets are absolute values, so need to subtract offset already in place
+            # so need to subtract offset already in place for the previous filter
             offset_to_apply = data.focusOffset - self.current_atspectrograph_filter_focus_offset
-            self.model.set_offset("z", offset_to_apply)
+            self.model.add_offset("z", offset_to_apply)
 
             self.log.debug(f"atspectrograph changed filters from {self.current_atspectrograph_filter_name} to {data.name}")
             self.log.debug(f"Calculated and hexapod-z model offset of {data.offset} "
@@ -869,6 +920,12 @@ class ATAOS(ConfigurableCsc):
             self.current_atspectrograph_filter_name = data.name
             self.current_atspectrograph_filter_focus_offset = data.focusOffset
             self.current_atspectrograph_filter_central_wavelength = data.centralWavelength
+
+            # Apply the offsets to the focusOffsetSummary event
+            self.focus_offset_per_category['totalFocusCorrectionOffset'] += data.focusOffset
+            self.focus_offset_per_category['filterOffset'] = data.focusOffset
+            self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
+                                                    force_output=True)
 
 
     def atspectrograph_disperser_monitor_callback(self, data):
@@ -881,7 +938,7 @@ class ATAOS(ConfigurableCsc):
         """
         if self.corrections['atspectrograph']:
             offset_to_apply = data.focusOffset - self.current_atspectrograph_disperser_focus_offset
-            self.model.set_offset("z", offset_to_apply)
+            self.model.add_offset("z", offset_to_apply)
 
             self.log.debug(f"atspectrograph changed dispersers from {self.current_atspectrograph_disperser_name} to {data.name}")
             self.log.debug(f"Calculated and hexapod-z model offset of {data.offset} "
@@ -889,6 +946,12 @@ class ATAOS(ConfigurableCsc):
 
             self.current_atspectrograph_disperser_name = data.name
             self.current_atspectrograph_disperser_focus_offset = data.focusOffset
+
+            # Apply the offsets to the focusOffsetSummary event
+            self.focus_offset_per_category['totalFocusCorrectionOffset'] += data.focusOffset
+            self.focus_offset_per_category['disperserOffset'] = data.focusOffset
+            self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
+                                                    force_output=True)
 
     def hexapod_monitor_callback(self, data):
         """A callback function to monitor position updates on the hexapod.
@@ -1025,7 +1088,7 @@ class ATAOS(ConfigurableCsc):
         await self.set_hexapod(azimuth, elevation, f'z')
 
     async def set_hexapod(self, azimuth, elevation, axis=f'xyzuvw'):
-        """Utility to set hexapod position.
+        """Utility to calculate desired hexapod position based on models, then apply the movements.
 
         Parameters
         ----------

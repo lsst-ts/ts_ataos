@@ -426,9 +426,6 @@ class TestCSC(unittest.TestCase):
 
             async with Harness() as harness:
 
-                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=60)
-                self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
-
                 def callback(data):
                     pass
 
@@ -457,7 +454,19 @@ class TestCSC(unittest.TestCase):
                 harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
                 harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
+                # report atspectrograph status
                 harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+                harness.atspectrograph.evt_reportedFilterPosition.set_put(name='empty_1',
+                                                                          position=1,
+                                                                          centralWavelength=701.5,
+                                                                          focusOffset=0.0)
+                harness.atspectrograph.evt_reportedDisperserPosition.set_put(name='empty_1',
+                                                                             position=1,
+                                                                             focusOffset=0.0)
+
+                # extend the timeout, to account for if all events aren't set yet
+                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=60)
+                self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
                 cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
 
@@ -470,9 +479,11 @@ class TestCSC(unittest.TestCase):
                                          timeout=timeout)
 
                 # Enable corrections one by one
-                corrections = ("m1", "m2", "hexapod", "focus", "moveWhileExposing")
+                # FIXME!!!
+                corrections = ("m1", "m2", "hexapod", "focus", "moveWhileExposing", "atspectrograph")
+#                corrections = ("m1","moveWhileExposing")
                 expected_corrections = {"m1": False, "m2": False, "hexapod": False, "focus": False,
-                                        "moveWhileExposing": False}
+                                        "moveWhileExposing": False, "atspectrograph": False}
 
                 logger.debug('Starting to loop over enabling corrections')
                 for corr in corrections:
@@ -508,6 +519,7 @@ class TestCSC(unittest.TestCase):
                 cmd_attr = getattr(harness.aos_remote, f"cmd_disableCorrection")
 
                 # Try to send empty disable correction, this will fail.
+                logger.debug('Try to send empty disable correction, this will fail')
                 with self.assertRaises(salobj.AckError):
                     await cmd_attr.start(cmd_attr.DataType(),
                                          timeout=timeout)
@@ -536,6 +548,7 @@ class TestCSC(unittest.TestCase):
                                              f"got {getattr(receive_topic, test_corr)}")
 
                 # everything is disable, send enable all.
+                logger.debug('everything is disable, send enable all.')
                 cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
                 send_topic = cmd_attr.DataType()
                 send_topic.enableAll = True
@@ -562,6 +575,7 @@ class TestCSC(unittest.TestCase):
                                             f"got {getattr(receive_topic, test_corr)}")
 
                 # everything is enable, send disable all
+                logger.debug('everything is enable, send disable all.')
                 cmd_attr = getattr(harness.aos_remote, f"cmd_disableCorrection")
                 send_topic = cmd_attr.DataType()
                 send_topic.disableAll = True
