@@ -5,7 +5,7 @@ import asyncio
 import numpy as np
 import logging
 import pathlib
-# import pytest
+import pytest
 
 from lsst.ts import salobj
 
@@ -19,6 +19,7 @@ index_gen = salobj.index_generator()
 
 logging.basicConfig()
 logger = logging.getLogger(__name__)
+logger.propagate = True
 logger.level = logging.DEBUG
 
 STD_TIMEOUT = 5  # standard command timeout (sec)
@@ -41,6 +42,13 @@ class Harness:
         self.camera = salobj.Controller("ATCamera")
         self.atspectrograph = salobj.Controller("ATSpectrograph")
 
+        # set the debug level to be whatever is set above. Note that this statement *MUST* occur after
+        # the controllers are created
+        self.csc.log.level = logger.level
+
+        # set the command timeout to be small so we don't have to wait for errors
+        self.csc.cmd_timeout = 5.
+
     async def __aenter__(self):
         await asyncio.gather(self.csc.start_task,
                              self.aos_remote.start_task,
@@ -62,8 +70,6 @@ class Harness:
 
 
 class TestCSC(unittest.TestCase):
-
-    # @pytest.mark.skip(reason="SKIPPING test_standard_state_transitions DUE TO SPEED/LOGGING ISSUES")
 
     def test_standard_state_transitions(self):
         """Test standard CSC state transitions.
@@ -88,7 +94,7 @@ class TestCSC(unittest.TestCase):
                               "applyFocusOffset",
                               "disableCorrection",
                               "enableCorrection")
-#                              "setFocus")
+            #                              "setFocus")
 
             async with Harness() as harness:
 
@@ -174,6 +180,19 @@ class TestCSC(unittest.TestCase):
 
         asyncio.get_event_loop().run_until_complete(doit())
 
+# FIXME: WHY DOESN"T THIS WORK??
+
+    # async def publish_mountEncoders(harness, azimuth, elevation, ntimes=5):
+    #
+    #     for i in range(ntimes):
+    #         _azimuth = np.zeros(100) + azimuth
+    #         # make sure it is never zero because np.random.uniform is [min, max)
+    #         _elevation = np.zeros(100) + elevation
+    #         harness.atmcs.tel_mount_AzEl_Encoders.set_put(
+    #             azimuthCalculatedAngle=_azimuth,
+    #             elevationCalculatedAngle=_elevation)
+    #         await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
+
     def test_applyCorrection(self):
         """Test applyCorrection command. """
 
@@ -222,7 +241,7 @@ class TestCSC(unittest.TestCase):
                 # command?
                 harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=hexapod_move_callback)
 
-                # Add callback to events
+                # Add callback to detailedState events
                 harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
 
                 timeout = 40. * salobj.base_csc.HEARTBEAT_INTERVAL
@@ -265,18 +284,21 @@ class TestCSC(unittest.TestCase):
                 # make sure it is never zero because np.random.uniform is [min, max)
                 elevation = 90. - np.random.uniform(0., 90.)
 
-                async def publish_mountEnconders(ntimes=5):
+                async def publish_mountEncoders(ntimes=5):
 
                     for i in range(ntimes):
-                        _azimuth = np.zeros(100)+azimuth
+                        _azimuth = np.zeros(100) + azimuth
                         # make sure it is never zero because np.random.uniform is [min, max)
-                        _elevation = np.zeros(100)+elevation
+                        _elevation = np.zeros(100) + elevation
                         harness.atmcs.tel_mount_AzEl_Encoders.set_put(
                             azimuthCalculatedAngle=_azimuth,
                             elevationCalculatedAngle=_elevation)
                         await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
 
-                await publish_mountEnconders()
+                await publish_mountEncoders()
+
+                # FIXME: WHY DOESN"T THIS WORK?
+                # await publish_mountEncoders(harness, azimuth, elevation, ntimes=5)
 
                 # Test that the hexapod won't move if there's an exposure happening
                 logger.debug("Test that the hexapod won't move if there's an exposure happening")
@@ -297,7 +319,7 @@ class TestCSC(unittest.TestCase):
                     await harness.aos_remote.cmd_applyCorrection.start(timeout=timeout)
 
                 # Give control back to event loop so it can gather remaining callbacks
-                await asyncio.sleep(5*salobj.base_csc.HEARTBEAT_INTERVAL)
+                await asyncio.sleep(5 * salobj.base_csc.HEARTBEAT_INTERVAL)
 
                 # Check that callbacks where called
                 logger.debug("Check that callbacks where called")
@@ -360,7 +382,6 @@ class TestCSC(unittest.TestCase):
         asyncio.get_event_loop().run_until_complete(doit(get_tel_pos=False))
         logger.debug("Run for specified location - COMPLETE")
 
-    # @pytest.mark.skip(reason="SKIPPING test_offsets DUE TO SPEED/LOGGING ISSUES")
     def test_offsets(self):
         """Test applyFocusOffset command."""
 
@@ -418,7 +439,246 @@ class TestCSC(unittest.TestCase):
 
         asyncio.get_event_loop().run_until_complete(doit())
 
-    # @pytest.mark.skip(reason="SKIPPING test_enable_disable_corrections DUE TO SPEED/LOGGING ISSUES")
+    def test_spectrograph_offsets(self):
+        """Test applyFocusOffset command."""
+
+        async def doit(atspectrograph=True,
+                       online_before_ataos=False,
+                       correction_loop=True):
+
+            async with Harness() as harness:
+
+                # send pneumatics data, just speeds up the tests
+                harness.pnematics.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+                harness.pnematics.evt_mainValveState.set_put(state=ATPneumatics.AirValveState.OPENED)
+                harness.pnematics.evt_instrumentState.set_put(state=ATPneumatics.AirValveState.OPENED)
+                harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
+                harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
+
+                # set the hexapod callback
+                def hexapod_move_callback(data):
+                    harness.hexapod.evt_positionUpdate.put()
+
+                # Add callback to events
+                def callback(data):
+                    pass
+
+                # Set required callbacks
+                harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=hexapod_move_callback)
+                harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
+
+                # Can only set these if the spectrograph is not going to come online
+                # if it goes offline the values will remain and no new filter/disperser
+                # positions will get published
+                if atspectrograph:
+                    filter_name = 'test_filt1'
+                    filter_focus_offset = 0.03
+                    filter_central_wavelength = 707.0
+
+                    disperser_name = 'test_disp1'
+                    disperser_focus_offset = 0.1
+
+                else:
+                    filter_name = ''
+                    filter_focus_offset = 0.0
+                    filter_central_wavelength = 0.0
+
+                    disperser_name = ''
+                    disperser_focus_offset = 0.0
+
+                if atspectrograph and online_before_ataos:
+                    logger.debug('Loading filter and dispersers before enabling ATAOS')
+                    # Bring spectrograph online and load filter/disperser
+                    harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+                    harness.atspectrograph.evt_reportedFilterPosition.set_put(
+                        name=filter_name,
+                        position=1,
+                        centralWavelength=filter_central_wavelength,
+                        focusOffset=filter_focus_offset
+                    )
+                    harness.atspectrograph.evt_reportedDisperserPosition.set_put(
+                        name=disperser_name,
+                        position=1,
+                        focusOffset=disperser_focus_offset
+                    )
+
+                # if there is nothing (atpneumatics/atspectrograph) sending events then this command times out
+                # need to extend the timeout in this case.
+
+                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=60)
+                self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
+
+                # send elevation/azimuth positions
+                azimuth = np.random.uniform(0., 360.)
+                # make sure it is never zero because np.random.uniform is [min, max)
+                elevation = 90. - np.random.uniform(0., 90.)
+
+                async def publish_mountEncoders(ntimes=5):
+                    logger.debug('publishing telescope position')
+                    for i in range(ntimes):
+                        _azimuth = np.zeros(100) + azimuth
+                        # make sure it is never zero because np.random.uniform is [min, max)
+                        _elevation = np.zeros(100) + elevation
+                        harness.atmcs.tel_mount_AzEl_Encoders.set_put(
+                            azimuthCalculatedAngle=_azimuth,
+                            elevationCalculatedAngle=_elevation)
+                        await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
+
+                await publish_mountEncoders()
+
+                # Start the ATAOS correction loop
+                # this should fail if the spectrograph isn't online!
+                if correction_loop is True and online_before_ataos is True:
+                    logger.debug('Enabling atspectrograph and hexapod corrections')
+                    await harness.aos_remote.cmd_enableCorrection.set_start(atspectrograph=True,
+                                                                            hexapod=True)
+                    # let the loop turn a few times
+                    await asyncio.sleep(5)
+
+                if atspectrograph and online_before_ataos is False:
+                    logger.debug('Loading filter and dispersers after enabling ATAOS')
+                    # Bring spectrograph online and load filter/disperser
+                    harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+                    # the summarystate causes offsets to be published, so flush these to be sure the grab
+                    # the proper one below
+                    harness.aos_remote.evt_correctionOffsets.flush()
+                    harness.aos_remote.evt_focusOffsetSummary.flush()
+
+                    harness.atspectrograph.evt_reportedFilterPosition.set_put(
+                        name=filter_name,
+                        position=1,
+                        centralWavelength=filter_central_wavelength,
+                        focusOffset=filter_focus_offset
+                    )
+                    harness.atspectrograph.evt_reportedDisperserPosition.set_put(
+                        name=disperser_name,
+                        position=1,
+                        focusOffset=disperser_focus_offset
+                    )
+
+                if correction_loop is True and online_before_ataos is False:
+                    logger.debug('Enabling atspectrograph and hexapod corrections')
+                    await harness.aos_remote.cmd_enableCorrection.set_start(atspectrograph=True,
+                                                                            hexapod=True)
+                    # let the loop turn a few times
+                    await asyncio.sleep(5)
+
+                # check spectrograph corrections were applied
+                correctionOffsets = await harness.aos_remote.evt_correctionOffsets.aget(timeout=STD_TIMEOUT)
+                # check spectrograph accounting is being done correctly
+                focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.aget(timeout=STD_TIMEOUT)
+                if correction_loop is True:
+
+                    logger.debug('Disabling corrections')
+                    await harness.aos_remote.cmd_disableCorrection.set_start(hexapod=True, atspectrograph=True)
+
+                    self.assertAlmostEqual(correctionOffsets.z, filter_focus_offset + disperser_focus_offset)
+                    self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                                           disperser_focus_offset + filter_focus_offset)
+                else:
+                    # offsets from filter/dispersers should not be applied
+                    self.assertAlmostEqual(correctionOffsets.z, 0.0)
+                    self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                                           0.0)
+
+                self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, 0.0)
+                self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset)
+                self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset)
+
+                offset = {'m1': 1.1,
+                          'm2': 1.2,
+                          'x': 1.3,
+                          'y': 1.4,
+                          'z': 1.5,
+                          'u': 1.6,
+                          'v': 1.7
+                          }
+
+                # flush events then send relative offsets
+                harness.aos_remote.evt_correctionOffsets.flush()
+                harness.aos_remote.evt_focusOffsetSummary.flush()
+
+                await harness.aos_remote.cmd_offset.set_start(**offset,
+                                                              timeout=STD_TIMEOUT)
+
+                offset_applied = await harness.aos_remote.evt_correctionOffsets.next(flush=False,
+                                                                                     timeout=STD_TIMEOUT)
+                focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(flush=False,
+                                                                                          timeout=STD_TIMEOUT)
+
+                # offsets should be combined in z
+                # this is ugly code but cleaning it up means creating another variable.
+                for axis in offset:
+                    logger.debug('axis = {}'.format(axis))
+                    logger.debug('offset[axis] = {} and '
+                                 'correction_offset = {}'.format(offset[axis],
+                                                                 getattr(
+                                                                     offset_applied,
+                                                                     axis)))
+                    with self.subTest(axis=axis):
+                        if axis != 'z':
+                            self.assertAlmostEqual(offset[axis],
+                                                   getattr(offset_applied, axis))
+                        else:
+                            # should be applied offset plus the filter/disperser offsets
+                            self.assertAlmostEqual(
+                                offset[axis] + disperser_focus_offset + filter_focus_offset,
+                                getattr(offset_applied, axis))
+                # check that summary is correct
+                self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                                       getattr(offset_applied, 'z'))
+                # user offset should just be whatever we supplied
+                self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, offset['z'])
+                self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset)
+                self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset)
+
+                # Now reset the offsets (after flushing events)
+                # will not reset spectrograph offsets!
+                harness.aos_remote.evt_correctionOffsets.flush()
+                harness.aos_remote.evt_focusOffsetSummary.flush()
+                await harness.aos_remote.cmd_resetOffset.start(timeout=STD_TIMEOUT)
+
+                offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
+                    flush=False,
+                    timeout=STD_TIMEOUT)
+                focusOffsetSummary = \
+                    await harness.aos_remote.evt_focusOffsetSummary.next(flush=False, timeout=STD_TIMEOUT)
+
+                for axis in offset:
+                    logger.debug('axis = {}'.format(axis))
+                    logger.debug('correction_offset = {}'.format(getattr(offset_applied, axis)))
+                    with self.subTest(axis=axis):
+                        if axis != 'z':
+                            self.assertAlmostEqual(0.0, getattr(offset_applied, axis))
+                        else:
+                            # correction offset should be zero plus the filter/disperser offsets
+                            self.assertAlmostEqual(0.0 + disperser_focus_offset + filter_focus_offset,
+                                                   getattr(offset_applied, axis))
+                # totals should be just filter/disperser offsets
+                self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                                       disperser_focus_offset + filter_focus_offset)
+                # user offset should be zero
+                self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, 0.0)
+                self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset)
+                self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset)
+
+                # send spectrograph offline
+                harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.OFFLINE)
+
+        logger.debug('Running test with spectrograph online before ATAOS')
+        asyncio.get_event_loop().run_until_complete(doit(atspectrograph=True, online_before_ataos=True))
+        logger.debug('COMPLETED test with spectrograph online before ATAOS \n')
+
+        logger.debug('Running test with spectrograph online after ATAOS')
+        asyncio.get_event_loop().run_until_complete(doit(atspectrograph=True, online_before_ataos=False))
+        logger.debug('COMPLETED test with spectrograph online after ATAOS \n')
+
+        logger.debug('Running test with spectrograph offline')
+        asyncio.get_event_loop().run_until_complete(doit(atspectrograph=False,
+                                                         online_before_ataos=False,
+                                                         correction_loop=False))
+        logger.debug('COMPLETED test with spectrograph offline \n')
+
     def test_enable_disable_corrections(self):
         """Test enableCorrection"""
 
@@ -479,9 +739,7 @@ class TestCSC(unittest.TestCase):
                                          timeout=timeout)
 
                 # Enable corrections one by one
-                # FIXME!!!
                 corrections = ("m1", "m2", "hexapod", "focus", "moveWhileExposing", "atspectrograph")
-#                corrections = ("m1","moveWhileExposing")
                 expected_corrections = {"m1": False, "m2": False, "hexapod": False, "focus": False,
                                         "moveWhileExposing": False, "atspectrograph": False}
 
@@ -604,7 +862,6 @@ class TestCSC(unittest.TestCase):
 
 
 if __name__ == '__main__':
-
     stream_handler = logging.StreamHandler(sys.stdout)  # leave uncommented to prevent flake8 error
     # stream_handler.setLevel(logging.DEBUG)
     # logger.addHandler(stream_handler)
