@@ -57,7 +57,7 @@ pipeline {
             steps {
                 script {
                     sh """
-                    docker exec -u saluser \${container_name} sh -c \"source ~/.setup.sh && source ~/.bashrc && make_idl_files.py ATAOS ATMCS ATPneumatics ATHexapod ATCamera ATPtg\"
+                    docker exec -u saluser \${container_name} sh -c \"source ~/.setup.sh && source ~/.bashrc && make_idl_files.py ATAOS ATMCS ATPneumatics ATHexapod ATSpectrograph ATCamera ATPtg\"
                     """
                 }
             }
