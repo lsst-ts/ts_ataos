@@ -1,2 +1,3 @@
 tests/__pycache__/
 python/lsst/ts/ataos/__pycache__/
+pytest_session.txt

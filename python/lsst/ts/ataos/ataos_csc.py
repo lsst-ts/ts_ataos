@@ -576,12 +576,11 @@ class ATAOS(ConfigurableCsc):
         # if correcting for atspectrograph setup then we must add back in the
         # filter/grating/wavelength offsets
         # best to do this immediately and not later in a loop as it'll be confusing to see
-        # large offsets pop up
+        # large offsets pop up when the loop comes on rather then when the reset command is set
         if 'atspectrograph' in self.corrections:
             offset_to_apply = (
-                    self.focus_offset_per_category['filterOffset']
-                    + self.focus_offset_per_category['disperserOffset']
-                    + self.focus_offset_per_category['wavelengthOffset']
+                self.focus_offset_per_category['filterOffset'] + self.focus_offset_per_category[
+                    'disperserOffset'] + self.focus_offset_per_category['wavelengthOffset']
             )
 
             self.model.set_offset('z', offset_to_apply)
@@ -776,11 +775,13 @@ class ATAOS(ConfigurableCsc):
                     # Check to see if any model offsets need applying due to changes in atspectrograph
                     # filter/disperser changes
                     # if atspectrograph - remove correction that needed to be applied
-                    self.log.debug("self.corrections['atspectrograph'] is {}".format(self.corrections['atspectrograph']))
-                    self.log.debug("self.focus_offset_yet_to_be_applied is {}".format(self.focus_offset_yet_to_be_applied))
+                    self.log.debug("self.corrections['atspectrograph']"
+                                   " is {}".format(self.corrections['atspectrograph']))
+                    self.log.debug("self.focus_offset_yet_to_be_applied "
+                                   "is {}".format(self.focus_offset_yet_to_be_applied))
                     if self.corrections['atspectrograph'] and (self.focus_offset_yet_to_be_applied != 0.0):
-                        self.log.info('Applying focus offsets in correction loop due to filter'
-                                      'changes.')
+                        self.log.info('Applying focus offsets in correction loop due to filter '
+                                      'and/or disperser changes.')
                         # add the offset, then reset the value
                         self.model.add_offset("z", self.focus_offset_yet_to_be_applied)
                         self.focus_offset_yet_to_be_applied = 0.0
@@ -793,7 +794,8 @@ class ATAOS(ConfigurableCsc):
                         self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                                             force_output=True)
                 else:
-                    # FIXME: Should this raise an exception?
+                    # This should not raise an exception as it would require the ATMCS is
+                    # online for the ATAOS to be online.
                     self.log.warning("No information available about telescope azimuth and/or "
                                      "elevation, m1, m2, hexapod cannot occur ")
 
@@ -801,8 +803,7 @@ class ATAOS(ConfigurableCsc):
                 # Run corrections in series because CSCs are not supporting
                 # concurrent operations yet 2019/June/4
                 corrections_to_apply.append(asyncio.sleep(self.correction_loop_time))
-                if self.corrections['hexapod'] is True:
-                    self.log.debug('corrections_to_apply is {}'.format(corrections_to_apply))
+
                 for corr in corrections_to_apply:
                     await corr
 
@@ -821,7 +822,7 @@ class ATAOS(ConfigurableCsc):
                 self.log.exception(e)
                 self.evt_errorCode.set_put(errorCode=CORRECTION_LOOP_DIED,
                                            errorReport="Correction loop died.",
-                                       traceback=traceback.format_exc())
+                                           traceback=traceback.format_exc())
                 self.fault()
                 break
 

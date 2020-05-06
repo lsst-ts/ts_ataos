@@ -5,7 +5,6 @@ import asyncio
 import numpy as np
 import logging
 import pathlib
-import pytest
 
 from lsst.ts import salobj
 
@@ -13,7 +12,6 @@ from lsst.ts.ataos import ataos_csc
 
 from lsst.ts.idl.enums import ATPneumatics
 
-# np.random.seed(47)
 
 index_gen = salobj.index_generator()
 
@@ -471,34 +469,37 @@ class TestCSC(unittest.TestCase):
                 # if it goes offline the values will remain and no new filter/disperser
                 # positions will get published
                 if atspectrograph:
-                    filter_name = 'test_filt1'
-                    filter_focus_offset = 0.03
-                    filter_central_wavelength = 707.0
+                    filter_name, filter_name2 = 'test_filt1', 'empty_1'
+                    filter_position, filter_position2 = 1, 2
+                    filter_focus_offset, filter_focus_offset2 = 0.03, 0.0
+                    filter_central_wavelength, filter_central_wavelength2 = 707.0, 700
 
-                    disperser_name = 'test_disp1'
-                    disperser_focus_offset = 0.1
+                    disperser_name, disperser_name2 = 'test_disp1', 'empty_2'
+                    disperser_position, disperser_position2 = 1, 2
+                    disperser_focus_offset, disperser_focus_offset2 = 0.1, 0.0
 
                 else:
-                    filter_name = ''
-                    filter_focus_offset = 0.0
-                    filter_central_wavelength = 0.0
+                    filter_name, filter_name2 = '', ''
+                    filter_focus_offset, filter_focus_offset2 = 0.0, 0.0
+                    filter_central_wavelength, filter_central_wavelength2 = 0.0, 0.0
 
-                    disperser_name = ''
-                    disperser_focus_offset = 0.0
+                    disperser_name, disperser_name2 = '', ''
+                    disperser_focus_offset, disperser_focus_offset2 = 0.0, 0.0
 
                 if atspectrograph and online_before_ataos:
                     logger.debug('Loading filter and dispersers before enabling ATAOS')
                     # Bring spectrograph online and load filter/disperser
                     harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+                    await asyncio.sleep(1)
                     harness.atspectrograph.evt_reportedFilterPosition.set_put(
                         name=filter_name,
-                        position=1,
+                        position=filter_position,
                         centralWavelength=filter_central_wavelength,
                         focusOffset=filter_focus_offset
                     )
                     harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                         name=disperser_name,
-                        position=1,
+                        position=disperser_position,
                         focusOffset=disperser_focus_offset
                     )
 
@@ -539,6 +540,7 @@ class TestCSC(unittest.TestCase):
                     logger.debug('Loading filter and dispersers after enabling ATAOS')
                     # Bring spectrograph online and load filter/disperser
                     harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+                    await asyncio.sleep(1)
                     # the summarystate causes offsets to be published, so flush these to be sure the grab
                     # the proper one below
                     harness.aos_remote.evt_correctionOffsets.flush()
@@ -567,16 +569,17 @@ class TestCSC(unittest.TestCase):
                 correctionOffsets = await harness.aos_remote.evt_correctionOffsets.aget(timeout=STD_TIMEOUT)
                 # check spectrograph accounting is being done correctly
                 focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.aget(timeout=STD_TIMEOUT)
-                if correction_loop is True:
 
+                if correction_loop is True:
                     logger.debug('Disabling corrections')
-                    await harness.aos_remote.cmd_disableCorrection.set_start(hexapod=True, atspectrograph=True)
+                    await harness.aos_remote.cmd_disableCorrection.set_start(hexapod=True,
+                                                                             atspectrograph=True)
 
                     self.assertAlmostEqual(correctionOffsets.z, filter_focus_offset + disperser_focus_offset)
                     self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
                                            disperser_focus_offset + filter_focus_offset)
                 else:
-                    # offsets from filter/dispersers should not be applied
+                    # offsets from filter/dispersers should not yet be applied if correction loop isn't on
                     self.assertAlmostEqual(correctionOffsets.z, 0.0)
                     self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
                                            0.0)
@@ -594,10 +597,18 @@ class TestCSC(unittest.TestCase):
                           'v': 1.7
                           }
 
+                # Now start the loops, we'll then add an offset, then remove a filter, then remove
+                # a disperser
+                if correction_loop is True:
+                    logger.debug('Re-enabling atspectrograph and hexapod corrections')
+                    await harness.aos_remote.cmd_enableCorrection.set_start(atspectrograph=True,
+                                                                            hexapod=True)
+
                 # flush events then send relative offsets
                 harness.aos_remote.evt_correctionOffsets.flush()
                 harness.aos_remote.evt_focusOffsetSummary.flush()
 
+                # add the user-offset
                 await harness.aos_remote.cmd_offset.set_start(**offset,
                                                               timeout=STD_TIMEOUT)
 
@@ -607,14 +618,9 @@ class TestCSC(unittest.TestCase):
                                                                                           timeout=STD_TIMEOUT)
 
                 # offsets should be combined in z
-                # this is ugly code but cleaning it up means creating another variable.
                 for axis in offset:
-                    logger.debug('axis = {}'.format(axis))
-                    logger.debug('offset[axis] = {} and '
-                                 'correction_offset = {}'.format(offset[axis],
-                                                                 getattr(
-                                                                     offset_applied,
-                                                                     axis)))
+                    logger.debug('axis = {} and correction_offset'
+                                 ' = {}'.format(axis, getattr(offset_applied, axis)))
                     with self.subTest(axis=axis):
                         if axis != 'z':
                             self.assertAlmostEqual(offset[axis],
@@ -624,6 +630,7 @@ class TestCSC(unittest.TestCase):
                             self.assertAlmostEqual(
                                 offset[axis] + disperser_focus_offset + filter_focus_offset,
                                 getattr(offset_applied, axis))
+
                 # check that summary is correct
                 self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
                                        getattr(offset_applied, 'z'))
@@ -631,6 +638,91 @@ class TestCSC(unittest.TestCase):
                 self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, offset['z'])
                 self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset)
                 self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset)
+
+                # This part of the test is only applicable if the spectrograph is online
+                if atspectrograph:
+                    logger.debug('Putting in filter2')
+                    # flush events then change filters
+                    harness.aos_remote.evt_correctionOffsets.flush()
+                    harness.aos_remote.evt_focusOffsetSummary.flush()
+
+                    harness.atspectrograph.evt_reportedFilterPosition.set_put(
+                        name=filter_name2,
+                        position=filter_position2,
+                        centralWavelength=filter_central_wavelength2,
+                        focusOffset=filter_focus_offset2
+                    )
+
+                    offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
+                        flush=False,
+                        timeout=STD_TIMEOUT
+                    )
+                    focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
+                        flush=False,
+                        timeout=STD_TIMEOUT
+                    )
+
+                    # offsets should be combined in z
+                    for axis in offset:
+
+                        with self.subTest(axis=axis):
+                            if axis != 'z':
+                                self.assertAlmostEqual(offset[axis],
+                                                       getattr(offset_applied, axis))
+                            else:
+                                # should be applied offset plus the filter/disperser offsets
+                                self.assertAlmostEqual(
+                                    offset[axis] + disperser_focus_offset + filter_focus_offset2,
+                                    getattr(offset_applied, axis))
+
+                    # check that summary is correct
+                    self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                                           getattr(offset_applied, 'z'))
+                    # user offset should just be whatever we supplied
+                    self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, offset['z'])
+                    self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset2)
+                    self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset)
+
+                    # flush events then change dispersers
+                    logger.debug('Putting in disperser2')
+                    harness.aos_remote.evt_correctionOffsets.flush()
+                    harness.aos_remote.evt_focusOffsetSummary.flush()
+
+                    harness.atspectrograph.evt_reportedDisperserPosition.set_put(
+                        name=disperser_name2,
+                        position=disperser_position2,
+                        focusOffset=disperser_focus_offset2
+                    )
+
+                    offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
+                        flush=False,
+                        timeout=STD_TIMEOUT
+                    )
+                    focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
+                        flush=False,
+                        timeout=STD_TIMEOUT
+                    )
+
+                    # offsets should be combined in z
+                    for axis in offset:
+
+                        with self.subTest(axis=axis):
+                            if axis != 'z':
+                                self.assertAlmostEqual(offset[axis],
+                                                       getattr(offset_applied, axis))
+                            else:
+                                # should be applied offset plus the filter/disperser offsets
+                                self.assertAlmostEqual(
+                                    offset[axis] + disperser_focus_offset2 + filter_focus_offset2,
+                                    getattr(offset_applied, axis))
+
+                    # check that summary is correct
+                    self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                                           getattr(offset_applied, 'z'))
+                    # user offset should just be whatever we supplied
+                    self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, offset['z'])
+                    self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset2)
+                    self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset2)
 
                 # Now reset the offsets (after flushing events)
                 # will not reset spectrograph offsets!
@@ -645,32 +737,40 @@ class TestCSC(unittest.TestCase):
                     await harness.aos_remote.evt_focusOffsetSummary.next(flush=False, timeout=STD_TIMEOUT)
 
                 for axis in offset:
-                    logger.debug('axis = {}'.format(axis))
-                    logger.debug('correction_offset = {}'.format(getattr(offset_applied, axis)))
+
                     with self.subTest(axis=axis):
                         if axis != 'z':
                             self.assertAlmostEqual(0.0, getattr(offset_applied, axis))
                         else:
                             # correction offset should be zero plus the filter/disperser offsets
-                            self.assertAlmostEqual(0.0 + disperser_focus_offset + filter_focus_offset,
+                            self.assertAlmostEqual(0.0 + disperser_focus_offset2 + filter_focus_offset2,
                                                    getattr(offset_applied, axis))
                 # totals should be just filter/disperser offsets
                 self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
-                                       disperser_focus_offset + filter_focus_offset)
+                                       disperser_focus_offset2 + filter_focus_offset2)
                 # user offset should be zero
                 self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, 0.0)
-                self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset)
-                self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset)
+                self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset2)
+                self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset2)
+
+                if correction_loop is True:
+                    logger.debug('Disabling corrections')
+                    await harness.aos_remote.cmd_disableCorrection.set_start(hexapod=True,
+                                                                             atspectrograph=True)
 
                 # send spectrograph offline
                 harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.OFFLINE)
 
         logger.debug('Running test with spectrograph online before ATAOS')
-        asyncio.get_event_loop().run_until_complete(doit(atspectrograph=True, online_before_ataos=True))
+        asyncio.get_event_loop().run_until_complete(doit(atspectrograph=True,
+                                                         online_before_ataos=True,
+                                                         correction_loop=True))
         logger.debug('COMPLETED test with spectrograph online before ATAOS \n')
 
         logger.debug('Running test with spectrograph online after ATAOS')
-        asyncio.get_event_loop().run_until_complete(doit(atspectrograph=True, online_before_ataos=False))
+        asyncio.get_event_loop().run_until_complete(doit(atspectrograph=True,
+                                                         online_before_ataos=False,
+                                                         correction_loop=True))
         logger.debug('COMPLETED test with spectrograph online after ATAOS \n')
 
         logger.debug('Running test with spectrograph offline')
