@@ -88,11 +88,9 @@ class TestCSC(unittest.TestCase):
 
             commands = ("start", "enable", "disable", "exitControl", "standby")
 
-            extra_commands = ("applyCorrection",
-                              "applyFocusOffset",
+            extra_commands = ("applyFocusOffset",
                               "disableCorrection",
                               "enableCorrection")
-            #                              "setFocus")
 
             async with Harness() as harness:
 
@@ -178,7 +176,7 @@ class TestCSC(unittest.TestCase):
 
         asyncio.get_event_loop().run_until_complete(doit())
 
-# FIXME: WHY DOESN"T THIS WORK??
+# FIXME: WHY DOESN"T THIS WORK?? It needs to be inside a given test??
 
     # async def publish_mountEncoders(harness, azimuth, elevation, ntimes=5):
     #
@@ -192,7 +190,8 @@ class TestCSC(unittest.TestCase):
     #         await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
 
     def test_applyCorrection(self):
-        """Test applyCorrection command. """
+        """Test applyCorrection command. This commands applies the corrections for the current
+        telescope position. It only works when the correction loop is not enabled."""
 
         async def doit(get_tel_pos=True, while_exposing=False):
 
@@ -295,7 +294,7 @@ class TestCSC(unittest.TestCase):
 
                 await publish_mountEncoders()
 
-                # FIXME: WHY DOESN"T THIS WORK?
+                # FIXME: WHY DOESN'T THIS WORK? Related to function above
                 # await publish_mountEncoders(harness, azimuth, elevation, ntimes=5)
 
                 # Test that the hexapod won't move if there's an exposure happening
@@ -381,7 +380,7 @@ class TestCSC(unittest.TestCase):
         logger.debug("Run for specified location - COMPLETE")
 
     def test_offsets(self):
-        """Test applyFocusOffset command."""
+        """Test offset command (which applies offsets to the models)"""
 
         async def doit():
 
@@ -438,7 +437,7 @@ class TestCSC(unittest.TestCase):
         asyncio.get_event_loop().run_until_complete(doit())
 
     def test_spectrograph_offsets(self):
-        """Test applyFocusOffset command."""
+        """Test offsets command and handling of offsets during filter/grating changes."""
 
         async def doit(atspectrograph=True,
                        online_before_ataos=False,
@@ -503,8 +502,9 @@ class TestCSC(unittest.TestCase):
                         focusOffset=disperser_focus_offset
                     )
 
-                # if there is nothing (atpneumatics/atspectrograph) sending events then this command times out
-                # need to extend the timeout in this case.
+                # If the atpneumatics and atspectrograph sending events then this command times out
+                # when using the default timeout, therefore it is extended here to account for that
+                # case.
 
                 await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=60)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
@@ -528,7 +528,7 @@ class TestCSC(unittest.TestCase):
                 await publish_mountEncoders()
 
                 # Start the ATAOS correction loop
-                # this should fail if the spectrograph isn't online!
+                # this would fail if the spectrograph isn't online!
                 if correction_loop is True and online_before_ataos is True:
                     logger.debug('Enabling atspectrograph and hexapod corrections')
                     await harness.aos_remote.cmd_enableCorrection.set_start(atspectrograph=True,
@@ -663,6 +663,7 @@ class TestCSC(unittest.TestCase):
                     )
 
                     # offsets should be combined in z
+                    # this could be made a function, but I found this easier to read/parse/understand
                     for axis in offset:
 
                         with self.subTest(axis=axis):
@@ -753,6 +754,7 @@ class TestCSC(unittest.TestCase):
                 self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset2)
                 self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset2)
 
+                # Disable corrections gracefully, makes debugging easier
                 if correction_loop is True:
                     logger.debug('Disabling corrections')
                     await harness.aos_remote.cmd_disableCorrection.set_start(hexapod=True,
