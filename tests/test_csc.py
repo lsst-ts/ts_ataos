@@ -543,7 +543,7 @@ class TestCSC(unittest.TestCase):
                     self.assertAlmostEqual(focusOffsetSummary.total,
                                            0.0)
 
-                self.assertAlmostEqual(focusOffsetSummary.user, 0.0)
+                self.assertAlmostEqual(focusOffsetSummary.userApplied, 0.0)
                 self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset)
                 self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset)
 
@@ -567,7 +567,7 @@ class TestCSC(unittest.TestCase):
                 harness.aos_remote.evt_correctionOffsets.flush()
                 harness.aos_remote.evt_focusOffsetSummary.flush()
 
-                # add the user-offset
+                # add the userApplied-offset
                 await harness.aos_remote.cmd_offset.set_start(**offset,
                                                               timeout=STD_TIMEOUT)
 
@@ -593,8 +593,8 @@ class TestCSC(unittest.TestCase):
                 # check that summary is correct
                 self.assertAlmostEqual(focusOffsetSummary.total,
                                        getattr(offset_applied, 'z'))
-                # user offset should just be whatever we supplied
-                self.assertAlmostEqual(focusOffsetSummary.user, offset['z'])
+                # userApplied offset should just be whatever we supplied
+                self.assertAlmostEqual(focusOffsetSummary.userApplied, offset['z'])
                 self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset)
                 self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset)
 
@@ -638,8 +638,8 @@ class TestCSC(unittest.TestCase):
                     # check that summary is correct
                     self.assertAlmostEqual(focusOffsetSummary.total,
                                            getattr(offset_applied, 'z'))
-                    # user offset should just be whatever we supplied
-                    self.assertAlmostEqual(focusOffsetSummary.user, offset['z'])
+                    # userApplied offset should just be whatever we supplied
+                    self.assertAlmostEqual(focusOffsetSummary.userApplied, offset['z'])
                     self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset2)
                     self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset)
 
@@ -679,8 +679,8 @@ class TestCSC(unittest.TestCase):
                     # check that summary is correct
                     self.assertAlmostEqual(focusOffsetSummary.total,
                                            getattr(offset_applied, 'z'))
-                    # user offset should just be whatever we supplied
-                    self.assertAlmostEqual(focusOffsetSummary.user, offset['z'])
+                    # userApplied offset should just be whatever we supplied
+                    self.assertAlmostEqual(focusOffsetSummary.userApplied, offset['z'])
                     self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset2)
                     self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset2)
 
@@ -708,8 +708,8 @@ class TestCSC(unittest.TestCase):
                 # totals should be just filter/disperser offsets
                 self.assertAlmostEqual(focusOffsetSummary.total,
                                        disperser_focus_offset2 + filter_focus_offset2)
-                # user offset should be zero
-                self.assertAlmostEqual(focusOffsetSummary.user, 0.0)
+                # userApplied offset should be zero
+                self.assertAlmostEqual(focusOffsetSummary.userApplied, 0.0)
                 self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset2)
                 self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset2)
 

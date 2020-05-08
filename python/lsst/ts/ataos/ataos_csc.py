@@ -147,7 +147,7 @@ class ATAOS(ConfigurableCsc):
                                   'v': None
                                   }
         self.focus_offset_per_category = {'total': 0.0,
-                                          'user': 0.0,
+                                          'userApplied': 0.0,
                                           'filter': 0.0,
                                           'disperser': 0.0,
                                           'wavelength': 0.0}
@@ -328,7 +328,7 @@ class ATAOS(ConfigurableCsc):
             self.focus_offset_yet_to_be_applied += disperser_data.focusOffset
 
         self.focus_offset_per_category['total'] = self.model.offset['z']
-        self.focus_offset_per_category['user'] = 0.0
+        self.focus_offset_per_category['userApplied'] = 0.0
 
         await super().begin_start(data)
         self.log.debug('Completed begin_start')
@@ -486,7 +486,7 @@ class ATAOS(ConfigurableCsc):
         self.model.add_offset("z", id_data.offset)
 
         self.focus_offset_per_category['total'] += id_data.offset
-        self.focus_offset_per_category['user'] = id_data.offset
+        self.focus_offset_per_category['userApplied'] = id_data.offset
         self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                             force_output=True)
 
@@ -510,7 +510,7 @@ class ATAOS(ConfigurableCsc):
         # reset all offsets to zero
         if id_data.axis == 'z':
             self.focus_offset_per_category['total'] = id_data.offset
-            self.focus_offset_per_category['user'] = id_data.offset
+            self.focus_offset_per_category['userApplied'] = id_data.offset
             self.focus_offset_per_category['filter'] = 0.0
             self.focus_offset_per_category['disperser'] = 0.0
             self.focus_offset_per_category['wavelength'] = 0.0
@@ -545,12 +545,12 @@ class ATAOS(ConfigurableCsc):
         # Should we send the event even if no focus offset is applied? Assuming no.
         if getattr(data, 'z') != 0.0:
             self.focus_offset_per_category['total'] += getattr(data, 'z')
-            self.focus_offset_per_category['user'] += getattr(data, 'z')
+            self.focus_offset_per_category['userApplied'] += getattr(data, 'z')
             self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                                 force_output=True)
 
     async def do_resetOffset(self, data):
-        """ Reset user provided offsets on a specific axis or all. Grating/Filter offsets will remain.
+        """ Reset userApplied provided offsets on a specific axis or all. Grating/Filter offsets will remain.
 
         Parameters
         ----------
@@ -584,7 +584,7 @@ class ATAOS(ConfigurableCsc):
 
         # Do not reset the filter/grating offsets, but reset the others
         self.focus_offset_per_category['total'] = self.model.offset['z']
-        self.focus_offset_per_category['user'] = 0.0
+        self.focus_offset_per_category['userApplied'] = 0.0
         self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                             force_output=True)
 
