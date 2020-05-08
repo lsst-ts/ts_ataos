@@ -485,14 +485,14 @@ class TestCSC(unittest.TestCase):
 
                 # Start the ATAOS correction loop
                 # this would fail if the spectrograph isn't online!
-                if correction_loop is True and online_before_ataos is True:
+                if correction_loop and online_before_ataos:
                     logger.debug('Enabling atspectrograph and hexapod corrections')
                     await harness.aos_remote.cmd_enableCorrection.set_start(atspectrograph=True,
                                                                             hexapod=True)
                     # let the loop turn a few times
                     await asyncio.sleep(10)
 
-                if atspectrograph and online_before_ataos is False:
+                elif atspectrograph and not online_before_ataos:
                     logger.debug('Loading filter and dispersers after enabling ATAOS')
                     # Bring spectrograph online and load filter/disperser
                     harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
@@ -517,7 +517,7 @@ class TestCSC(unittest.TestCase):
                     # trying to add a correction
                     await asyncio.sleep(1)
 
-                if correction_loop is True and online_before_ataos is False:
+                if correction_loop and not online_before_ataos:
                     logger.debug('Enabling atspectrograph and hexapod corrections')
                     await harness.aos_remote.cmd_enableCorrection.set_start(atspectrograph=True,
                                                                             hexapod=True)
@@ -529,7 +529,7 @@ class TestCSC(unittest.TestCase):
                 # check spectrograph accounting is being done correctly
                 focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.aget(timeout=STD_TIMEOUT)
 
-                if correction_loop is True:
+                if correction_loop:
                     logger.debug('Disabling corrections')
                     await harness.aos_remote.cmd_disableCorrection.set_start(hexapod=True,
                                                                              atspectrograph=True)
@@ -558,7 +558,7 @@ class TestCSC(unittest.TestCase):
 
                 # Now start the loops, we'll then add an offset, then remove a filter, then remove
                 # a disperser
-                if correction_loop is True:
+                if correction_loop:
                     logger.debug('Re-enabling atspectrograph and hexapod corrections')
                     await harness.aos_remote.cmd_enableCorrection.set_start(atspectrograph=True,
                                                                             hexapod=True)
@@ -714,7 +714,7 @@ class TestCSC(unittest.TestCase):
                 self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset2)
 
                 # Disable corrections gracefully, makes debugging easier
-                if correction_loop is True:
+                if correction_loop:
                     logger.debug('Disabling corrections')
                     await harness.aos_remote.cmd_disableCorrection.set_start(hexapod=True,
                                                                              atspectrograph=True)
