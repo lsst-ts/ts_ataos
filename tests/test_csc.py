@@ -176,19 +176,6 @@ class TestCSC(unittest.TestCase):
 
         asyncio.get_event_loop().run_until_complete(doit())
 
-# FIXME: WHY DOESN"T THIS WORK?? It needs to be inside a given test??
-
-    # async def publish_mountEncoders(harness, azimuth, elevation, ntimes=5):
-    #
-    #     for i in range(ntimes):
-    #         _azimuth = np.zeros(100) + azimuth
-    #         # make sure it is never zero because np.random.uniform is [min, max)
-    #         _elevation = np.zeros(100) + elevation
-    #         harness.atmcs.tel_mount_AzEl_Encoders.set_put(
-    #             azimuthCalculatedAngle=_azimuth,
-    #             elevationCalculatedAngle=_elevation)
-    #         await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
-
     def test_applyCorrection(self):
         """Test applyCorrection command. This commands applies the corrections for the current
         telescope position. It only works when the correction loop is not enabled."""
@@ -242,13 +229,12 @@ class TestCSC(unittest.TestCase):
                 harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
 
                 timeout = 40. * salobj.base_csc.HEARTBEAT_INTERVAL
-                # Enable the CSC
+
                 logger.debug('Enabling ataos')
                 await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
                 logger.debug('Enabled ataos')
 
-                # Check that applyCorrection fails if enable Correction is on
                 logger.debug('Check that applyCorrection fails if enable Correction is on')
                 harness.aos_remote.cmd_enableCorrection.set(m1=True)
                 await harness.aos_remote.cmd_enableCorrection.start(timeout=timeout)
@@ -256,7 +242,6 @@ class TestCSC(unittest.TestCase):
                 with self.assertRaises(salobj.AckError):
                     await harness.aos_remote.cmd_applyCorrection.start(timeout=timeout)
 
-                # Switch corrections off
                 logger.debug('Switch corrections off')
                 harness.aos_remote.cmd_disableCorrection.set(disableAll=True)
                 await harness.aos_remote.cmd_disableCorrection.start(timeout=timeout)
@@ -275,29 +260,13 @@ class TestCSC(unittest.TestCase):
                 coro_hx_end = harness.aos_remote.evt_hexapodCorrectionCompleted.next(flush=False,
                                                                                      timeout=timeout)
 
-                # Send applyCorrection command
                 logger.debug('Send applyCorrection command')
                 azimuth = np.random.uniform(0., 360.)
                 # make sure it is never zero because np.random.uniform is [min, max)
                 elevation = 90. - np.random.uniform(0., 90.)
 
-                async def publish_mountEncoders(ntimes=5):
+                await publish_mountEncoders(harness, azimuth, elevation, ntimes=5)
 
-                    for i in range(ntimes):
-                        _azimuth = np.zeros(100) + azimuth
-                        # make sure it is never zero because np.random.uniform is [min, max)
-                        _elevation = np.zeros(100) + elevation
-                        harness.atmcs.tel_mount_AzEl_Encoders.set_put(
-                            azimuthCalculatedAngle=_azimuth,
-                            elevationCalculatedAngle=_elevation)
-                        await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
-
-                await publish_mountEncoders()
-
-                # FIXME: WHY DOESN'T THIS WORK? Related to function above
-                # await publish_mountEncoders(harness, azimuth, elevation, ntimes=5)
-
-                # Test that the hexapod won't move if there's an exposure happening
                 logger.debug("Test that the hexapod won't move if there's an exposure happening")
                 if while_exposing:
                     shutter_state_topic = harness.camera.evt_shutterDetailedState.DataType()
@@ -318,7 +287,6 @@ class TestCSC(unittest.TestCase):
                 # Give control back to event loop so it can gather remaining callbacks
                 await asyncio.sleep(5 * salobj.base_csc.HEARTBEAT_INTERVAL)
 
-                # Check that callbacks where called
                 logger.debug("Check that callbacks where called")
                 harness.pnematics.cmd_m1SetPressure.callback.assert_called()
                 harness.pnematics.cmd_m2SetPressure.callback.assert_called()
@@ -362,8 +330,7 @@ class TestCSC(unittest.TestCase):
                     '%s' % harness.aos_remote.evt_detailedState.callback.call_args_list
                 )
 
-                # disable CSC
-                logger.debug("Disable CSC")
+                logger.debug("Disable ATAOS CSC")
                 await harness.aos_remote.cmd_disable.start(timeout=timeout)
 
         # Run test getting the telescope position
@@ -489,7 +456,7 @@ class TestCSC(unittest.TestCase):
                     logger.debug('Loading filter and dispersers before enabling ATAOS')
                     # Bring spectrograph online and load filter/disperser
                     harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
-                    await asyncio.sleep(1)
+
                     harness.atspectrograph.evt_reportedFilterPosition.set_put(
                         name=filter_name,
                         position=filter_position,
@@ -501,7 +468,7 @@ class TestCSC(unittest.TestCase):
                         position=disperser_position,
                         focusOffset=disperser_focus_offset
                     )
-
+                    await asyncio.sleep(1)
                 # If the atpneumatics and atspectrograph sending events then this command times out
                 # when using the default timeout, therefore it is extended here to account for that
                 # case.
@@ -514,18 +481,7 @@ class TestCSC(unittest.TestCase):
                 # make sure it is never zero because np.random.uniform is [min, max)
                 elevation = 90. - np.random.uniform(0., 90.)
 
-                async def publish_mountEncoders(ntimes=5):
-                    logger.debug('publishing telescope position')
-                    for i in range(ntimes):
-                        _azimuth = np.zeros(100) + azimuth
-                        # make sure it is never zero because np.random.uniform is [min, max)
-                        _elevation = np.zeros(100) + elevation
-                        harness.atmcs.tel_mount_AzEl_Encoders.set_put(
-                            azimuthCalculatedAngle=_azimuth,
-                            elevationCalculatedAngle=_elevation)
-                        await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
-
-                await publish_mountEncoders()
+                await publish_mountEncoders(harness, azimuth, elevation, ntimes=5)
 
                 # Start the ATAOS correction loop
                 # this would fail if the spectrograph isn't online!
@@ -534,13 +490,13 @@ class TestCSC(unittest.TestCase):
                     await harness.aos_remote.cmd_enableCorrection.set_start(atspectrograph=True,
                                                                             hexapod=True)
                     # let the loop turn a few times
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(10)
 
                 if atspectrograph and online_before_ataos is False:
                     logger.debug('Loading filter and dispersers after enabling ATAOS')
                     # Bring spectrograph online and load filter/disperser
                     harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
-                    await asyncio.sleep(1)
+
                     # the summarystate causes offsets to be published, so flush these to be sure the grab
                     # the proper one below
                     harness.aos_remote.evt_correctionOffsets.flush()
@@ -557,6 +513,9 @@ class TestCSC(unittest.TestCase):
                         position=1,
                         focusOffset=disperser_focus_offset
                     )
+                    # let the loop turn a few times otherwise it'll say the component is offline when
+                    # trying to add a correction
+                    await asyncio.sleep(1)
 
                 if correction_loop is True and online_before_ataos is False:
                     logger.debug('Enabling atspectrograph and hexapod corrections')
@@ -958,9 +917,19 @@ class TestCSC(unittest.TestCase):
         logger.debug('Starting test_enable_disable_corrections')
         asyncio.get_event_loop().run_until_complete(doit())
 
-    # def test_setFocus(self):
-    #     """Test setFocus"""
-    #     pass
+
+async def publish_mountEncoders(harness, azimuth, elevation, ntimes=5):
+    """Publish telescope position as an event"""
+
+    # arrays need to have a length of 100 values
+    for i in range(ntimes):
+        _azimuth = np.zeros(100) + azimuth
+        # make sure it is never zero because np.random.uniform is [min, max)
+        _elevation = np.zeros(100) + elevation
+        harness.atmcs.tel_mount_AzEl_Encoders.set_put(
+            azimuthCalculatedAngle=_azimuth,
+            elevationCalculatedAngle=_elevation)
+        await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
 
 
 if __name__ == '__main__':
