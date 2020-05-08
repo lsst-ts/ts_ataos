@@ -146,11 +146,11 @@ class ATAOS(ConfigurableCsc):
                                   'u': None,
                                   'v': None
                                   }
-        self.focus_offset_per_category = {'totalFocusCorrectionOffset': 0.0,
-                                          'cumulativeUserOffset': 0.0,
-                                          'filterOffset': 0.0,
-                                          'disperserOffset': 0.0,
-                                          'wavelengthOffset': 0.0}
+        self.focus_offset_per_category = {'total': 0.0,
+                                          'user': 0.0,
+                                          'filter': 0.0,
+                                          'disperser': 0.0,
+                                          'wavelength': 0.0}
 
         # Add callback to get positions
         self.hexapod.evt_positionUpdate.callback = self.hexapod_monitor_callback
@@ -320,15 +320,15 @@ class ATAOS(ConfigurableCsc):
         # these offsets get applied in correction_loop method
         if filter_data is not None:
             # self.model.add_offset("z", filter_data.focusOffset)
-            self.focus_offset_per_category['filterOffset'] = filter_data.focusOffset
+            self.focus_offset_per_category['filter'] = filter_data.focusOffset
             self.focus_offset_yet_to_be_applied += filter_data.focusOffset
         if disperser_data is not None:
             # self.model.add_offset("z", disperser_data.focusOffset)
-            self.focus_offset_per_category['disperserOffset'] = disperser_data.focusOffset
+            self.focus_offset_per_category['disperser'] = disperser_data.focusOffset
             self.focus_offset_yet_to_be_applied += disperser_data.focusOffset
 
-        self.focus_offset_per_category['totalFocusCorrectionOffset'] = self.model.offset['z']
-        self.focus_offset_per_category['cumulativeUserOffset'] = 0.0
+        self.focus_offset_per_category['total'] = self.model.offset['z']
+        self.focus_offset_per_category['user'] = 0.0
 
         await super().begin_start(data)
         self.log.debug('Completed begin_start')
@@ -485,8 +485,8 @@ class ATAOS(ConfigurableCsc):
 
         self.model.add_offset("z", id_data.offset)
 
-        self.focus_offset_per_category['totalFocusCorrectionOffset'] += id_data.offset
-        self.focus_offset_per_category['cumulativeUserOffset'] = id_data.offset
+        self.focus_offset_per_category['total'] += id_data.offset
+        self.focus_offset_per_category['user'] = id_data.offset
         self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                             force_output=True)
 
@@ -509,11 +509,11 @@ class ATAOS(ConfigurableCsc):
                                            force_output=True)
         # reset all offsets to zero
         if id_data.axis == 'z':
-            self.focus_offset_per_category['totalFocusCorrectionOffset'] = id_data.offset
-            self.focus_offset_per_category['cumulativeUserOffset'] = id_data.offset
-            self.focus_offset_per_category['filterOffset'] = 0.0
-            self.focus_offset_per_category['disperserOffset'] = 0.0
-            self.focus_offset_per_category['wavelengthOffset'] = 0.0
+            self.focus_offset_per_category['total'] = id_data.offset
+            self.focus_offset_per_category['user'] = id_data.offset
+            self.focus_offset_per_category['filter'] = 0.0
+            self.focus_offset_per_category['disperser'] = 0.0
+            self.focus_offset_per_category['wavelength'] = 0.0
             self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                                 force_output=True)
 
@@ -544,8 +544,8 @@ class ATAOS(ConfigurableCsc):
 
         # Should we send the event even if no focus offset is applied? Assuming no.
         if getattr(data, 'z') != 0.0:
-            self.focus_offset_per_category['totalFocusCorrectionOffset'] += getattr(data, 'z')
-            self.focus_offset_per_category['cumulativeUserOffset'] += getattr(data, 'z')
+            self.focus_offset_per_category['total'] += getattr(data, 'z')
+            self.focus_offset_per_category['user'] += getattr(data, 'z')
             self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                                 force_output=True)
 
@@ -573,8 +573,8 @@ class ATAOS(ConfigurableCsc):
         # large offsets pop up when the loop comes on rather then when the reset command is set
         if 'atspectrograph' in self.corrections:
             offset_to_apply = (
-                self.focus_offset_per_category['filterOffset'] + self.focus_offset_per_category[
-                    'disperserOffset'] + self.focus_offset_per_category['wavelengthOffset']
+                self.focus_offset_per_category['filter'] + self.focus_offset_per_category[
+                    'disperser'] + self.focus_offset_per_category['wavelength']
             )
 
             self.model.set_offset('z', offset_to_apply)
@@ -583,8 +583,8 @@ class ATAOS(ConfigurableCsc):
                                            force_output=True)
 
         # Do not reset the filter/grating offsets, but reset the others
-        self.focus_offset_per_category['totalFocusCorrectionOffset'] = self.model.offset['z']
-        self.focus_offset_per_category['cumulativeUserOffset'] = 0.0
+        self.focus_offset_per_category['total'] = self.model.offset['z']
+        self.focus_offset_per_category['user'] = 0.0
         self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                             force_output=True)
 
@@ -779,14 +779,18 @@ class ATAOS(ConfigurableCsc):
                             f'in correction loop due to filter '
                             f'and/or disperser changes.')
                         # add the offset, then reset the value
-                        self.model.add_offset("z", self.focus_offset_yet_to_be_applied)
-                        self.focus_offset_yet_to_be_applied = 0.0
+                        # using subtraction here to avoid a possible race condition
+                        # note that self.focus_offset_yet_to_be_applied is a value not an object
+                        # so no deepcopy is required
+                        _offset_value = self.focus_offset_yet_to_be_applied
+                        self.model.add_offset("z", _offset_value)
+                        self.focus_offset_yet_to_be_applied -= _offset_value
                         # publish events with new offsets
                         self.evt_correctionOffsets.set_put(**self.model.offset,
                                                            force_output=True)
                         # Do accounting to republish total offset and others that were set
                         # in the callbacks
-                        self.focus_offset_per_category['totalFocusCorrectionOffset'] = self.model.offset['z']
+                        self.focus_offset_per_category['total'] = self.model.offset['z']
                         self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                                             force_output=True)
                 else:
@@ -952,7 +956,7 @@ class ATAOS(ConfigurableCsc):
         self.log.info('Caught ATSpectrograph filter change, calculating correction offsets')
         # Relative offset are to be applied to the model
         # so therefore we need to subtract offset already in place for the previous filter
-        offset_to_apply = data.focusOffset - self.focus_offset_per_category['filterOffset']
+        offset_to_apply = data.focusOffset - self.focus_offset_per_category['filter']
 
         self.log.debug(f"atspectrograph changed filters "
                        f"from {self.current_atspectrograph_filter_name} to {data.name}")
@@ -961,8 +965,8 @@ class ATAOS(ConfigurableCsc):
 
         self.current_atspectrograph_filter_name = data.name
         # Apply the offsets to the focusOffsetSummary event
-        self.focus_offset_per_category['totalFocusCorrectionOffset'] += data.focusOffset
-        self.focus_offset_per_category['filterOffset'] = data.focusOffset
+        self.focus_offset_per_category['total'] += data.focusOffset
+        self.focus_offset_per_category['filter'] = data.focusOffset
         self.focus_offset_yet_to_be_applied += offset_to_apply
 
     def atspectrograph_disperser_monitor_callback(self, data):
@@ -974,7 +978,7 @@ class ATAOS(ConfigurableCsc):
             Command ID and data
         """
         self.log.info('Caught ATSpectrograph disperser change, calculating correction offsets')
-        offset_to_apply = data.focusOffset - self.focus_offset_per_category['disperserOffset']
+        offset_to_apply = data.focusOffset - self.focus_offset_per_category['disperser']
 
         self.log.debug(f"atspectrograph changed dispersers "
                        f"from {self.current_atspectrograph_disperser_name} to {data.name}")
@@ -984,8 +988,8 @@ class ATAOS(ConfigurableCsc):
         self.current_atspectrograph_disperser_name = data.name
 
         # Apply the offsets to the focusOffsetSummary event
-        self.focus_offset_per_category['totalFocusCorrectionOffset'] += data.focusOffset
-        self.focus_offset_per_category['disperserOffset'] = data.focusOffset
+        self.focus_offset_per_category['total'] += data.focusOffset
+        self.focus_offset_per_category['disperser'] = data.focusOffset
         self.focus_offset_yet_to_be_applied += offset_to_apply
 
     def hexapod_monitor_callback(self, data):
@@ -1260,11 +1264,11 @@ class ATAOS(ConfigurableCsc):
         self.log.debug('Got new atspectrograph summary state, resetting filter/disperser offsets')
         self.atspectrograph_summary_state = State(data.summaryState)
         # remove offsets from previous spectrograph setup
-        self.focus_offset_yet_to_be_applied = -self.focus_offset_per_category['filterOffset']
-        self.focus_offset_per_category['filterOffset'] = 0.0
+        self.focus_offset_yet_to_be_applied = -self.focus_offset_per_category['filter']
+        self.focus_offset_per_category['filter'] = 0.0
 
-        self.focus_offset_yet_to_be_applied = -self.focus_offset_per_category['disperserOffset']
-        self.focus_offset_per_category['disperserOffset'] = 0.0
+        self.focus_offset_yet_to_be_applied = -self.focus_offset_per_category['disperser']
+        self.focus_offset_per_category['disperser'] = 0.0
 
     async def check_atspectrograph(self):
         """ Check that the atspectrograph is online and enabled"""

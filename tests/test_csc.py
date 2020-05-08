@@ -535,17 +535,17 @@ class TestCSC(unittest.TestCase):
                                                                              atspectrograph=True)
 
                     self.assertAlmostEqual(correctionOffsets.z, filter_focus_offset + disperser_focus_offset)
-                    self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                    self.assertAlmostEqual(focusOffsetSummary.total,
                                            disperser_focus_offset + filter_focus_offset)
                 else:
                     # offsets from filter/dispersers should not yet be applied if correction loop isn't on
                     self.assertAlmostEqual(correctionOffsets.z, 0.0)
-                    self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                    self.assertAlmostEqual(focusOffsetSummary.total,
                                            0.0)
 
-                self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, 0.0)
-                self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset)
-                self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset)
+                self.assertAlmostEqual(focusOffsetSummary.user, 0.0)
+                self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset)
+                self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset)
 
                 offset = {'m1': 1.1,
                           'm2': 1.2,
@@ -591,12 +591,12 @@ class TestCSC(unittest.TestCase):
                                 getattr(offset_applied, axis))
 
                 # check that summary is correct
-                self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                self.assertAlmostEqual(focusOffsetSummary.total,
                                        getattr(offset_applied, 'z'))
                 # user offset should just be whatever we supplied
-                self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, offset['z'])
-                self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset)
-                self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset)
+                self.assertAlmostEqual(focusOffsetSummary.user, offset['z'])
+                self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset)
+                self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset)
 
                 # This part of the test is only applicable if the spectrograph is online
                 if atspectrograph:
@@ -636,12 +636,12 @@ class TestCSC(unittest.TestCase):
                                     getattr(offset_applied, axis))
 
                     # check that summary is correct
-                    self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                    self.assertAlmostEqual(focusOffsetSummary.total,
                                            getattr(offset_applied, 'z'))
                     # user offset should just be whatever we supplied
-                    self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, offset['z'])
-                    self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset2)
-                    self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset)
+                    self.assertAlmostEqual(focusOffsetSummary.user, offset['z'])
+                    self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset2)
+                    self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset)
 
                     # flush events then change dispersers
                     logger.debug('Putting in disperser2')
@@ -677,12 +677,12 @@ class TestCSC(unittest.TestCase):
                                     getattr(offset_applied, axis))
 
                     # check that summary is correct
-                    self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                    self.assertAlmostEqual(focusOffsetSummary.total,
                                            getattr(offset_applied, 'z'))
                     # user offset should just be whatever we supplied
-                    self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, offset['z'])
-                    self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset2)
-                    self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset2)
+                    self.assertAlmostEqual(focusOffsetSummary.user, offset['z'])
+                    self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset2)
+                    self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset2)
 
                 # Now reset the offsets (after flushing events)
                 # will not reset spectrograph offsets!
@@ -706,12 +706,12 @@ class TestCSC(unittest.TestCase):
                             self.assertAlmostEqual(0.0 + disperser_focus_offset2 + filter_focus_offset2,
                                                    getattr(offset_applied, axis))
                 # totals should be just filter/disperser offsets
-                self.assertAlmostEqual(focusOffsetSummary.totalFocusCorrectionOffset,
+                self.assertAlmostEqual(focusOffsetSummary.total,
                                        disperser_focus_offset2 + filter_focus_offset2)
                 # user offset should be zero
-                self.assertAlmostEqual(focusOffsetSummary.cumulativeUserOffset, 0.0)
-                self.assertAlmostEqual(focusOffsetSummary.filterOffset, filter_focus_offset2)
-                self.assertAlmostEqual(focusOffsetSummary.disperserOffset, disperser_focus_offset2)
+                self.assertAlmostEqual(focusOffsetSummary.user, 0.0)
+                self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset2)
+                self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset2)
 
                 # Disable corrections gracefully, makes debugging easier
                 if correction_loop is True:
