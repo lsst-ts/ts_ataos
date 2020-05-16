@@ -12,10 +12,12 @@ from lsst.ts.ataos import ataos_csc
 
 from lsst.ts.idl.enums import ATPneumatics
 
-
 index_gen = salobj.index_generator()
 
-logging.basicConfig()
+# logging.basicConfig()   # doesn't work with test_ataos, but does work with test_atspec
+# in new container (b76). Works for both in old container (b68)
+
+logging.basicConfig(level=logging.DEBUG)  # works with test_ataos in new container and old container
 logger = logging.getLogger(__name__)
 logger.propagate = True
 logger.level = logging.DEBUG
@@ -35,36 +37,42 @@ class Harness:
 
         # Adds Controllers to receive commands from the ATAOS system
         self.atmcs = salobj.Controller("ATMCS")
+        self.atptg = salobj.Controller("ATPtg")
         self.pnematics = salobj.Controller("ATPneumatics")
         self.hexapod = salobj.Controller("ATHexapod")
         self.camera = salobj.Controller("ATCamera")
         self.atspectrograph = salobj.Controller("ATSpectrograph")
 
+        # set the command timeout to be small so we don't have to wait for errors
+        self.csc.cmd_timeout = 5.
         # set the debug level to be whatever is set above. Note that this statement *MUST* occur after
         # the controllers are created
         self.csc.log.level = logger.level
-
-        # set the command timeout to be small so we don't have to wait for errors
-        self.csc.cmd_timeout = 5.
+        # self.csc.atcs.log.level = logger.level  ## NOT NECESSARY?
 
     async def __aenter__(self):
         await asyncio.gather(self.csc.start_task,
                              self.aos_remote.start_task,
                              self.atmcs.start_task,
+                             self.atptg.start_task,
                              self.pnematics.start_task,
                              self.hexapod.start_task,
                              self.camera.start_task,
-                             self.atspectrograph.start_task)
+                             self.atspectrograph.start_task
+                             )
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        # async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, *args):
         await asyncio.gather(self.csc.close(),
                              self.aos_remote.close(),
                              self.atmcs.close(),
+                             self.atptg.close(),
                              self.pnematics.close(),
                              self.hexapod.close(),
                              self.camera.close(),
-                             self.atspectrograph.close())
+                             self.atspectrograph.close()
+                             )
 
 
 class TestCSC(unittest.TestCase):
@@ -178,7 +186,8 @@ class TestCSC(unittest.TestCase):
 
     def test_applyCorrection(self):
         """Test applyCorrection command. This commands applies the corrections for the current
-        telescope position. It only works when the correction loop is not enabled."""
+        telescope position. It only works when the correction loop is not enabled. It does not apply
+        any offsets from the spectrograph setup since that only occurs when the loop is enabled"""
 
         async def doit(get_tel_pos=True, while_exposing=False):
 
@@ -439,11 +448,12 @@ class TestCSC(unittest.TestCase):
                     filter_position, filter_position2 = 1, 2
                     filter_focus_offset, filter_focus_offset2 = 0.03, 0.0
                     filter_central_wavelength, filter_central_wavelength2 = 707.0, 700
+                    filter_pointing_offsets, filter_pointing_offsets2 = [0.1, -0.1], [0.2, -0.2]
 
                     disperser_name, disperser_name2 = 'test_disp1', 'empty_2'
                     disperser_position, disperser_position2 = 1, 2
                     disperser_focus_offset, disperser_focus_offset2 = 0.1, 0.0
-
+                    disperser_pointing_offsets, disperser_pointing_offsets2 = [0.05, -0.05], [0.13, -0.13]
                 else:
                     filter_name, filter_name2 = '', ''
                     filter_focus_offset, filter_focus_offset2 = 0.0, 0.0
@@ -461,13 +471,16 @@ class TestCSC(unittest.TestCase):
                         name=filter_name,
                         position=filter_position,
                         centralWavelength=filter_central_wavelength,
-                        focusOffset=filter_focus_offset
+                        focusOffset=filter_focus_offset,
+                        pointingOffsets=filter_pointing_offsets
                     )
                     harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                         name=disperser_name,
                         position=disperser_position,
-                        focusOffset=disperser_focus_offset
+                        focusOffset=disperser_focus_offset,
+                        pointingOffsets=disperser_pointing_offsets
                     )
+                    logger.debug('Awaiting here1 for 1s')
                     await asyncio.sleep(1)
                 # If the atpneumatics and atspectrograph sending events then this command times out
                 # when using the default timeout, therefore it is extended here to account for that
@@ -506,12 +519,14 @@ class TestCSC(unittest.TestCase):
                         name=filter_name,
                         position=1,
                         centralWavelength=filter_central_wavelength,
-                        focusOffset=filter_focus_offset
+                        focusOffset=filter_focus_offset,
+                        pointingOffsets=filter_pointing_offsets
                     )
                     harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                         name=disperser_name,
                         position=1,
-                        focusOffset=disperser_focus_offset
+                        focusOffset=disperser_focus_offset,
+                        pointingOffsets=disperser_pointing_offsets
                     )
                     # let the loop turn a few times otherwise it'll say the component is offline when
                     # trying to add a correction
@@ -543,7 +558,8 @@ class TestCSC(unittest.TestCase):
                     self.assertAlmostEqual(focusOffsetSummary.total,
                                            0.0)
 
-                self.assertAlmostEqual(focusOffsetSummary.userApplied, 0.0)
+                self.assertAlmostEqual(focusOffsetSummary.userApplied,
+                                       0.0)
                 self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset)
                 self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset)
 
@@ -609,7 +625,8 @@ class TestCSC(unittest.TestCase):
                         name=filter_name2,
                         position=filter_position2,
                         centralWavelength=filter_central_wavelength2,
-                        focusOffset=filter_focus_offset2
+                        focusOffset=filter_focus_offset2,
+                        pointingOffsets=filter_pointing_offsets2
                     )
 
                     offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
@@ -651,7 +668,8 @@ class TestCSC(unittest.TestCase):
                     harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                         name=disperser_name2,
                         position=disperser_position2,
-                        focusOffset=disperser_focus_offset2
+                        focusOffset=disperser_focus_offset2,
+                        pointingOffsets=disperser_pointing_offsets2
                     )
 
                     offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
@@ -741,9 +759,8 @@ class TestCSC(unittest.TestCase):
         logger.debug('COMPLETED test with spectrograph offline \n')
 
     def test_enable_disable_corrections(self):
-        """Test enableCorrection"""
 
-        async def doit():
+        async def doit(telescope_online=False):
 
             async with Harness() as harness:
 
@@ -762,12 +779,24 @@ class TestCSC(unittest.TestCase):
                 def m2_close_callback(data):
                     harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
 
+                # set the hexapod callback
+                def hexapod_move_callback(data):
+                    harness.hexapod.evt_positionUpdate.put()
+
+                async def mount_offset_callback(self):
+                    # just assume 0.1 degree offets
+                    harness.atmcs.evt_allAxesInPosition.set_put(inPosition=False)
+                    await publish_mountEncoders(harness, azimuth+0.1, elevation+0.1, ntimes=1)
+                    harness.atmcs.evt_allAxesInPosition.set_put(inPosition=True)
+
                 harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
                 harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
                 harness.pnematics.cmd_m1OpenAirValve.callback = Mock(wraps=m1_open_callback)
                 harness.pnematics.cmd_m2OpenAirValve.callback = Mock(wraps=m2_open_callback)
                 harness.pnematics.cmd_m1CloseAirValve.callback = Mock(wraps=m1_close_callback)
                 harness.pnematics.cmd_m2CloseAirValve.callback = Mock(wraps=m2_close_callback)
+                harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=hexapod_move_callback)
+                harness.atptg.cmd_offsetAzEl.callback = Mock(wraps=mount_offset_callback)
 
                 harness.pnematics.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
                 harness.pnematics.evt_mainValveState.set_put(state=ATPneumatics.AirValveState.OPENED)
@@ -777,63 +806,126 @@ class TestCSC(unittest.TestCase):
 
                 # report atspectrograph status
                 harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
-                harness.atspectrograph.evt_reportedFilterPosition.set_put(name='empty_1',
-                                                                          position=1,
-                                                                          centralWavelength=701.5,
-                                                                          focusOffset=0.0)
-                harness.atspectrograph.evt_reportedDisperserPosition.set_put(name='empty_1',
-                                                                             position=1,
-                                                                             focusOffset=0.0)
+                filterFocusOffset, disperserFocusOffset = 0.1, 0.05
+                filterPointingOffsets = np.array([0.03, -0.03])
+                gratingPointingOffsets = np.array([0.1, -0.1])
 
+                harness.atspectrograph.evt_reportedFilterPosition.set_put(
+                    name='filter1',
+                    position=1,
+                    centralWavelength=701.5,
+                    focusOffset=filterFocusOffset,
+                    pointingOffsets=filterPointingOffsets
+                )
+                harness.atspectrograph.evt_reportedDisperserPosition.set_put(
+                    name='disperser2',
+                    position=1,
+                    focusOffset=disperserFocusOffset,
+                    pointingOffsets=gratingPointingOffsets
+                )
+
+                # Put ataos in enabled state
                 # extend the timeout, to account for if all events aren't set yet
-                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=60)
+                await asyncio.sleep(1)
+
+                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=80)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
-                cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
-
-                timeout = 5 * salobj.base_csc.HEARTBEAT_INTERVAL
+                if telescope_online:
+                    azimuth, elevation = 25.0, 60.0
+                    await publish_mountEncoders(harness, azimuth, elevation, ntimes=2)
+                else:
+                    azimuth, elevation = None, None
 
                 # Try to send empty enable correction, this will fail.
                 logger.debug('Try to send empty enable correction, this will fail.')
                 with self.assertRaises(salobj.AckError):
-                    await cmd_attr.start(cmd_attr.DataType(),
-                                         timeout=timeout)
+                    await harness.aos_remote.cmd_enableCorrection.set_start(timeout=STD_TIMEOUT)
 
                 # Enable corrections one by one
                 corrections = ("m1", "m2", "hexapod", "focus", "moveWhileExposing", "atspectrograph")
                 expected_corrections = {"m1": False, "m2": False, "hexapod": False, "focus": False,
                                         "moveWhileExposing": False, "atspectrograph": False}
 
+                # Perform command the old fashioned way so we can iterate over the corrections
+                cmd_attr = getattr(harness.aos_remote, f"cmd_enableCorrection")
+
                 logger.debug('Starting to loop over enabling corrections')
                 for corr in corrections:
-                    send_topic = cmd_attr.DataType()
                     expected_corrections[corr] = True
                     # Note: Setting only the correction I want to enable. Any correction already
                     # enabled will be left unchanged. This is part of the test.
-                    setattr(send_topic, corr, True)
-                    logger.debug(corr)
-                    coro = getattr(harness.aos_remote,
-                                   f"evt_correctionEnabled").next(flush=False,
-                                                                  timeout=timeout)
-                    await cmd_attr.start(send_topic,
-                                         timeout=timeout)
-                    logger.debug(f"TEST 1: {corr}")
-                    receive_topic = await coro
-                    logger.debug(f"TEST 2: {corr}")
+                    logger.debug(f'Enabling correction {corr}')
+
+                    # flush correctionEnabled event
+                    harness.aos_remote.evt_correctionEnabled.flush()
+                    harness.aos_remote.evt_hexapodCorrectionCompleted.flush()
+                    harness.aos_remote.evt_atspectrographCorrectionStarted.flush()
+                    harness.aos_remote.evt_atspectrographCorrectionCompleted.flush()
+                    harness.aos_remote.evt_focusOffsetSummary.flush()
+                    harness.aos_remote.evt_pointingOffsetSummary.flush()
+                    # send command to start
+                    await harness.aos_remote.cmd_enableCorrection.set_start(**expected_corrections)
+
+                    # grab correction enabled event
+                    correctionEnabledEvent = await harness.aos_remote.evt_correctionEnabled.next(
+                        flush=False,
+                        timeout=STD_TIMEOUT
+                    )
+
+                    # let the loop turn a few times to make sure it doesn't crash
+                    logger.debug(f'Correction {corr} enabled')
+
                     if corr == "m1":
+                        await harness.aos_remote.evt_m1CorrectionStarted.aget(timeout=STD_TIMEOUT)
                         harness.pnematics.cmd_m1SetPressure.callback.assert_called()
                         harness.pnematics.cmd_m1OpenAirValve.callback.assert_called()
+                        await harness.aos_remote.evt_m1CorrectionCompleted.aget(timeout=STD_TIMEOUT)
                     elif corr == "m2":
+                        await harness.aos_remote.evt_m2CorrectionStarted.aget(timeout=STD_TIMEOUT)
                         harness.pnematics.cmd_m2SetPressure.callback.assert_called()
                         harness.pnematics.cmd_m2OpenAirValve.callback.assert_called()
+                        await harness.aos_remote.evt_m2CorrectionCompleted.aget(timeout=STD_TIMEOUT)
+                    elif corr == "hexapod":
+                        await harness.aos_remote.evt_hexapodCorrectionStarted.aget(timeout=STD_TIMEOUT)
+                        harness.pnematics.cmd_m2SetPressure.callback.assert_called()
+                        harness.pnematics.cmd_m2OpenAirValve.callback.assert_called()
+                        await harness.aos_remote.evt_hexapodCorrectionCompleted.aget(timeout=STD_TIMEOUT)
+                    elif corr == "atspectrograph" and telescope_online:
+                        await harness.aos_remote.evt_atspectrographCorrectionStarted.aget(timeout=STD_TIMEOUT)
+                        await harness.aos_remote.evt_atspectrographCorrectionCompleted.aget(
+                            timeout=STD_TIMEOUT)
+                        # check pointing offset was applied
+                        harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                        # check offsets were applied correctly
+                        focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
+                            flush=False,
+                            timeout=STD_TIMEOUT)
+                        self.assertAlmostEqual(focusOffsetSummary.total,
+                                               disperserFocusOffset + filterFocusOffset)
+                        # userApplied offset should be zero
+                        self.assertAlmostEqual(focusOffsetSummary.userApplied, 0.0)
+                        self.assertAlmostEqual(focusOffsetSummary.filter, filterFocusOffset)
+                        self.assertAlmostEqual(focusOffsetSummary.disperser, disperserFocusOffset)
+                        pointingOffsetSummary = await harness.aos_remote.evt_pointingOffsetSummary.next(
+                            flush=False,
+                            timeout=STD_TIMEOUT)
+                        # pointingOffsets are arrays, so loop over values individually
+                        for n in range(len(pointingOffsetSummary.total)-1):
+                            self.assertAlmostEqual(pointingOffsetSummary.filter[n],
+                                                   filterPointingOffsets[n])
+                            self.assertAlmostEqual(pointingOffsetSummary.disperser[n],
+                                                   gratingPointingOffsets[n])
+                            self.assertAlmostEqual(pointingOffsetSummary.total[n],
+                                                   filterPointingOffsets[n]+gratingPointingOffsets[n])
 
                     for test_corr in corrections:
                         with self.subTest(test_corr=test_corr):
-                            self.assertEqual(getattr(receive_topic, test_corr),
+                            self.assertEqual(getattr(correctionEnabledEvent, test_corr),
                                              expected_corrections[test_corr],
                                              f"Failed to set correction for {test_corr}. "
                                              f"Expected {expected_corrections[test_corr]}, "
-                                             f"got {getattr(receive_topic, test_corr)}")
+                                             f"got {getattr(correctionEnabledEvent, test_corr)}")
 
                 cmd_attr = getattr(harness.aos_remote, f"cmd_disableCorrection")
 
@@ -841,7 +933,7 @@ class TestCSC(unittest.TestCase):
                 logger.debug('Try to send empty disable correction, this will fail')
                 with self.assertRaises(salobj.AckError):
                     await cmd_attr.start(cmd_attr.DataType(),
-                                         timeout=timeout)
+                                         timeout=STD_TIMEOUT)
 
                 # Disable corrections one by one
                 for corr in corrections:
@@ -854,9 +946,9 @@ class TestCSC(unittest.TestCase):
 
                     coro = getattr(harness.aos_remote,
                                    f"evt_correctionEnabled").next(flush=False,
-                                                                  timeout=timeout)
+                                                                  timeout=STD_TIMEOUT)
                     await cmd_attr.start(send_topic,
-                                         timeout=timeout)
+                                         timeout=STD_TIMEOUT)
                     receive_topic = await coro
                     for test_corr in corrections:
                         with self.subTest(test_corr=test_corr):
@@ -874,9 +966,9 @@ class TestCSC(unittest.TestCase):
 
                 coro = getattr(harness.aos_remote,
                                f"evt_correctionEnabled").next(flush=False,
-                                                              timeout=timeout)
+                                                              timeout=STD_TIMEOUT)
                 await cmd_attr.start(send_topic,
-                                     timeout=timeout)
+                                     timeout=STD_TIMEOUT)
                 receive_topic = await coro
 
                 # They should all be true, except moveWhileExposing
@@ -901,9 +993,9 @@ class TestCSC(unittest.TestCase):
 
                 coro = getattr(harness.aos_remote,
                                f"evt_correctionEnabled").next(flush=False,
-                                                              timeout=timeout)
+                                                              timeout=STD_TIMEOUT)
                 await cmd_attr.start(send_topic,
-                                     timeout=timeout)
+                                     timeout=STD_TIMEOUT)
                 receive_topic = await coro
 
                 # They should all be False
@@ -914,8 +1006,14 @@ class TestCSC(unittest.TestCase):
                                          f"Expected False, "
                                          f"got {getattr(receive_topic, test_corr)}")
 
-        logger.debug('Starting test_enable_disable_corrections')
-        asyncio.get_event_loop().run_until_complete(doit())
+                # send to disabled state so loop errors don't plague output
+                logger.debug('Setting ATAOS to disabled state at end of test_enable_disable_corrections')
+                await salobj.set_summary_state(harness.aos_remote, salobj.State.DISABLED, timeout=80)
+
+        # logger.debug('Starting test_enable_disable_corrections without telescope position published')
+        # asyncio.get_event_loop().run_until_complete(doit(telescope_online=False))
+        logger.debug('Starting test_enable_disable_corrections with telescope position published')
+        asyncio.get_event_loop().run_until_complete(doit(telescope_online=True))
 
 
 async def publish_mountEncoders(harness, azimuth, elevation, ntimes=5):
@@ -929,6 +1027,10 @@ async def publish_mountEncoders(harness, azimuth, elevation, ntimes=5):
         harness.atmcs.tel_mount_AzEl_Encoders.set_put(
             azimuthCalculatedAngle=_azimuth,
             elevationCalculatedAngle=_elevation)
+        harness.atmcs.tel_mount_Nasmyth_Encoders.set_put(
+            nasmyth1CalculatedAngle=_azimuth,
+            nasmyth2CalculatedAngle=_azimuth,
+        )
         await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
 
 
