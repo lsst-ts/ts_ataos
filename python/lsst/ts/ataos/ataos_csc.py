@@ -3,6 +3,7 @@ import traceback
 import enum
 import pathlib
 import numpy as np
+import copy
 
 from lsst.ts.salobj import (base_csc, ConfigurableCsc, Remote, State,
                             AckError, SalRetCode)
@@ -156,6 +157,7 @@ class ATAOS(ConfigurableCsc):
                                   'u': None,
                                   'v': None
                                   }
+
         self.focusOffsetPerCategory = {'total': 0.0,
                                        'userApplied': 0.0,
                                        'filter': 0.0,
@@ -333,30 +335,21 @@ class ATAOS(ConfigurableCsc):
         # add focus offsets from spectrograph - this is the first time these offsets are determined
         # these offsets get applied in correction_loop method
         if filter_data is not None:
-            # self.model.add_offset("z", filter_data.focusOffset)
             self.focusOffsetPerCategory['filter'] = filter_data.focusOffset
             self.focusOffsetYetToBeApplied += filter_data.focusOffset
-            self.log.debug(f"in being start filter_data.pointingOffsets is  {filter_data.pointingOffsets}")
-            self.pointingOffsetsPerCategory['filter'] = filter_data.pointingOffsets
-            self.pointingOffsetsYetToBeApplied += filter_data.pointingOffsets
-            self.pointingOffsetsPerCategory['total'] += filter_data.pointingOffsets
-            self.log.debug(f"in being start after filter addition self.pointingOffsetsYetToBeApplied"
-                           f" is  {self.pointingOffsetsYetToBeApplied}")
+            self.pointingOffsetsPerCategory['filter'] = np.array(filter_data.pointingOffsets)
+            self.pointingOffsetsYetToBeApplied += np.array(filter_data.pointingOffsets)
+            self.currentAtspectrographFilterName = filter_data.name
+
         if disperser_data is not None:
-            # self.model.add_offset("z", disperser_data.focusOffset)
             self.focusOffsetPerCategory['disperser'] = disperser_data.focusOffset
             self.focusOffsetYetToBeApplied += disperser_data.focusOffset
-            self.log.debug(f"in being start disperser_data.pointingOffsets"
-                           f" is  {disperser_data.pointingOffsets}")
-            self.pointingOffsetsPerCategory['disperser'] = disperser_data.pointingOffsets
-            self.pointingOffsetsYetToBeApplied += disperser_data.pointingOffsets
-            self.pointingOffsetsPerCategory['total'] += disperser_data.pointingOffsets
-            self.log.debug(f"in being start after disperser addition self.pointingOffsetsYetToBeApplied"
-                           f" is  {self.pointingOffsetsYetToBeApplied}")
+            self.pointingOffsetsPerCategory['disperser'] = np.array(disperser_data.pointingOffsets)
+            self.pointingOffsetsYetToBeApplied += np.array(disperser_data.pointingOffsets)
+            self.currentAtspectrographDisperserName = disperser_data.name
 
         self.focusOffsetPerCategory['total'] = self.model.offset['z']
         self.focusOffsetPerCategory['userApplied'] = 0.0
-
 
         await super().begin_start(data)
         self.log.debug('Completed begin_start')
@@ -487,6 +480,9 @@ class ATAOS(ConfigurableCsc):
                                 self.model.get_correction_m2(azimuth,
                                                              elevation))
 
+        self.log.debug("Apply corrections from spectrograph")
+        await self.set_atspectrograph_corrections(azimuth, elevation)
+
         # FIXME: THIS is not working with the current version of the software
         # need to see what is the problem. 2019/June/04
         # run corrections concurrently
@@ -522,7 +518,7 @@ class ATAOS(ConfigurableCsc):
         """Sets offset to selected model axis correction. These are *NOT* a cumulative offsets and will
         reset whatever values are currently entered.
 
-        Any values determined from the spectrograph configuration will also be reset
+        Any values determined from the spectrograph configuration will also be reset, except pointing offets
 
         Parameters
         ----------
@@ -570,7 +566,7 @@ class ATAOS(ConfigurableCsc):
         self.evt_correctionOffsets.set_put(**self.model.offset,
                                            force_output=True)
 
-        # Should we send the event even if no focus offset is applied? Assuming no.
+        # Should we send the event even if no focus offset is applied? Assuming not.
         if getattr(data, 'z') != 0.0:
             self.focusOffsetPerCategory['total'] += getattr(data, 'z')
             self.focusOffsetPerCategory['userApplied'] += getattr(data, 'z')
@@ -578,7 +574,8 @@ class ATAOS(ConfigurableCsc):
                                                 force_output=True)
 
     async def do_resetOffset(self, data):
-        """ Reset userApplied provided offsets on a specific axis or all. Grating/Filter offsets will remain.
+        """ Reset userApplied provided offsets on a specific axis or all. Grating/Filter focus and pointing
+        offsets will remain.
 
         Parameters
         ----------
@@ -745,8 +742,13 @@ class ATAOS(ConfigurableCsc):
         await asyncio.sleep(0.)  # give control back to event loop
         self.publish_enable_corrections()
 
+    # TODO: This requires implementation
     async def do_setWavelength(self, id_data):
         """Set wavelength to optimize focus.
+
+        Warning
+        -------
+        This is not yet implemented
 
         Parameters
         ----------
@@ -967,7 +969,7 @@ class ATAOS(ConfigurableCsc):
         # Relative offset are to be applied to the model
         # so therefore we need to subtract offset already in place for the previous filter
         _offsetToApply = data.focusOffset - self.focusOffsetPerCategory['filter']
-        _pointingOffsetsToApply = data.pointingOffsets - self.pointingOffsetsPerCategory['filter']
+        _pointingOffsetsToApply = np.array(data.pointingOffsets) - self.pointingOffsetsPerCategory['filter']
 
         self.log.debug(f"atspectrograph changed filters "
                        f"from {self.currentAtspectrographFilterName} to {data.name}")
@@ -982,8 +984,7 @@ class ATAOS(ConfigurableCsc):
         self.focusOffsetPerCategory['filter'] = data.focusOffset
         self.focusOffsetYetToBeApplied += _offsetToApply
 
-        self.pointingOffsetsPerCategory['total'] += data.pointingOffsets
-        self.pointingOffsetsPerCategory['filter'] += data.pointingOffsets
+        self.pointingOffsetsPerCategory['filter'] = np.array(data.pointingOffsets)
         self.pointingOffsetsYetToBeApplied += _pointingOffsetsToApply
 
     def atspectrograph_disperser_monitor_callback(self, data):
@@ -1012,8 +1013,7 @@ class ATAOS(ConfigurableCsc):
         self.focusOffsetPerCategory['disperser'] = data.focusOffset
         self.focusOffsetYetToBeApplied += _offsetToApply
 
-        self.pointingOffsetsPerCategory['total'] += data.pointingOffsets
-        self.pointingOffsetsPerCategory['disperser'] += data.pointingOffsets
+        self.pointingOffsetsPerCategory['disperser'] = np.array(data.pointingOffsets)
         self.pointingOffsetsYetToBeApplied += _pointingOffsetsToApply
 
     def hexapod_monitor_callback(self, data):
@@ -1241,7 +1241,7 @@ class ATAOS(ConfigurableCsc):
 
             status_bit = DetailedState.ATSPECTROGRAPH
             _offsetValue = 0.0
-            _pointingTolerance = 0.1  # arcseconds - arbitrary, just here for rounding issues
+            _pointingTolerance = 0.01  # arcseconds - arbitrary, just here for rounding issues
             _pointingOffsets = np.zeros((2))
 
             # Start with Focus offset
@@ -1259,7 +1259,7 @@ class ATAOS(ConfigurableCsc):
                 # using subtraction here to avoid a possible race condition
                 # note that self.focusOffsetYetToBeApplied is a value not an object
                 # so no deepcopy is required
-                _offsetValue = self.focusOffsetYetToBeApplied
+                _offsetValue = copy.deepcopy(self.focusOffsetYetToBeApplied)
                 self.model.add_offset("z", _offsetValue)
                 self.focusOffsetYetToBeApplied -= _offsetValue
                 # publish events with new offsets
@@ -1273,14 +1273,15 @@ class ATAOS(ConfigurableCsc):
                 await asyncio.sleep(0)
 
             # Now do pointing
-            if abs(np.max(self.pointingOffsetsYetToBeApplied)) > _pointingTolerance:
+            if abs(np.max(self.pointingOffsetsYetToBeApplied)) > abs(_pointingTolerance):
                 self.log.info(
                     f'Applying pointing offset of [X,Y]={self.pointingOffsetsYetToBeApplied} '
                     f'in correction loop due to filter '
                     f'and/or disperser changes.')
-                _pointingOffsets = self.pointingOffsetsYetToBeApplied
+                _pointingOffsets = copy.deepcopy(self.pointingOffsetsYetToBeApplied)
             elif(_offsetValue):
                 # No offsets above thresholds, so just return
+                self.log.debug('Focus and pointing offsets below tolerances. Passing without correcting')
                 pass
 
             # Corrections required, so flip the bit on the detailed state
@@ -1289,6 +1290,7 @@ class ATAOS(ConfigurableCsc):
             self.log.debug(f'_offsetValue is {_offsetValue}')
             self.log.debug(f'_pointingOffsets is {_pointingOffsets}')
 
+            # send out even saying correction is started
             self.evt_atspectrographCorrectionStarted.set_put(focusOffset=_offsetValue,
                                                              pointingOffsets=_pointingOffsets)
 
@@ -1300,17 +1302,22 @@ class ATAOS(ConfigurableCsc):
                     await asyncio.sleep(0)
 
                 if np.max(abs(_pointingOffsets)):
-                    self.log.debug('Applying pointing correction with atcs')
+                    self.log.debug(f'Applying pointing correction _pointingOffsets'
+                                   f' = {_pointingOffsets} with atcs')
                     # apply offsets relative to what is already there
                     await self.atcs.offset_xy(_pointingOffsets[0], _pointingOffsets[1],
                                               relative=True)
-                    self.pointingOffsetsYetToBeApplied -= _pointingOffsets
+                    await asyncio.sleep(0)
+                    # update accounting and remove the offsets that were applied
                     self.pointingOffsetsPerCategory['total'] += _pointingOffsets
+                    self.pointingOffsetsYetToBeApplied -= _pointingOffsets
+
+                    self.log.debug(f"new value of pointingOffsetsPerCategory['total'] is"
+                                   f" {self.pointingOffsetsPerCategory['total']}")
                     self.evt_pointingOffsetSummary.set_put(
                         total=self.pointingOffsetsPerCategory['total'],
                         filter=self.pointingOffsetsPerCategory['filter'],
                         disperser=self.pointingOffsetsPerCategory['disperser'])
-                    await asyncio.sleep(0)
 
             except Exception as e:
                 self.log.warning(f"Failed to apply spectrograph pointing offsets of {_pointingOffsets} or "
@@ -1391,17 +1398,17 @@ class ATAOS(ConfigurableCsc):
         self.log.debug('Got new atspectrograph summary state, resetting filter/disperser offsets')
         self.atspectrographSummaryState = State(data.summaryState)
         # remove offsets from previous spectrograph setup
-        self.focusOffsetYetToBeApplied = -self.focusOffsetPerCategory['filter']
+        self.focusOffsetYetToBeApplied += -self.focusOffsetPerCategory['filter']
         self.focusOffsetPerCategory['filter'] = 0.0
 
-        self.focusOffsetYetToBeApplied = -self.focusOffsetPerCategory['disperser']
+        self.focusOffsetYetToBeApplied += -self.focusOffsetPerCategory['disperser']
         self.focusOffsetPerCategory['disperser'] = 0.0
 
-        self.pointingOffsetsYetToBeApplied = -self.pointingOffsetsPerCategory['filter']
-        self.pointingOffsetsPerCategory['filter'] = 0.0
+        self.pointingOffsetsYetToBeApplied += -self.pointingOffsetsPerCategory['filter']
+        self.pointingOffsetsPerCategory['filter'] = np.array([0.0, 0.0])
 
-        self.pointingOffsetsYetToBeApplied = -self.pointingOffsetsPerCategory['disperser']
-        self.pointingOffsetsPerCategory['disperser'] = 0.0
+        self.pointingOffsetsYetToBeApplied += -self.pointingOffsetsPerCategory['disperser']
+        self.pointingOffsetsPerCategory['disperser'] = np.array([0.0, 0.0])
 
     async def check_atspectrograph(self):
         """ Check that the atspectrograph is online and enabled"""
