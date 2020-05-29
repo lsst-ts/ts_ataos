@@ -39,10 +39,11 @@ class Harness:
         self.camera = salobj.Controller("ATCamera")
         self.atspectrograph = salobj.Controller("ATSpectrograph")
 
-        # set the command timeout to be small so we don't have to wait for errors
+        # set the command timeout to be small so we don't have to wait for
+        # errors
         self.csc.cmd_timeout = 5.
-        # set the debug level to be whatever is set above. Note that this statement *MUST* occur after
-        # the controllers are created
+        # set the debug level to be whatever is set above. Note that this
+        # statement *MUST* occur after the controllers are created
         self.csc.log.level = logger.level
         # self.csc.atcs.log.level = logger.level  ## NOT NECESSARY?
 
@@ -105,7 +106,8 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(harness.csc.summary_state, salobj.State.STANDBY)
                 self.assertEqual(current_state.summaryState, salobj.State.STANDBY)
 
-                # Check that settingVersions was published and matches expected values
+                # Check that settingVersions was published and matches
+                # expected values
                 setting_versions = await harness.aos_remote.evt_settingVersions.next(flush=False,
                                                                                      timeout=1.)
                 self.assertIsNotNone(setting_versions)
@@ -134,8 +136,9 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
                 self.assertEqual(state.summaryState, salobj.State.DISABLED)
 
-                # TODO: There are two events issued when starting; appliedSettingsMatchStart and
-                # settingsApplied. Check that they are received.
+                # TODO: There are two events issued when starting;
+                # appliedSettingsMatchStart and settingsApplied.
+                # Check that they are received.
 
                 for bad_command in commands:
                     if bad_command in ("enable", "standby"):
@@ -181,8 +184,10 @@ class TestCSC(unittest.TestCase):
         asyncio.get_event_loop().run_until_complete(doit())
 
     def test_applyCorrection(self):
-        """Test applyCorrection command. This commands applies the corrections for the current
-        telescope position. It only works when the correction loop is not enabled.  """
+        """Test applyCorrection command. This commands applies the corrections
+        for the current telescope position. It only works when the correction
+        loop is not enabled.
+         """
 
         async def doit(get_tel_pos=True, while_exposing=False):
 
@@ -284,7 +289,8 @@ class TestCSC(unittest.TestCase):
 
                 logger.debug('Send applyCorrection command')
                 azimuth = np.random.uniform(0., 360.)
-                # make sure it is never zero because np.random.uniform is [min, max)
+                # make sure it is never zero because np.random.uniform
+                # is [min, max)
                 elevation = 90. - np.random.uniform(0., 90.)
 
                 await publish_mountEncoders(harness, azimuth, elevation, ntimes=5)
@@ -306,7 +312,8 @@ class TestCSC(unittest.TestCase):
                     await asyncio.sleep(5 * salobj.base_csc.HEARTBEAT_INTERVAL)
                     await harness.aos_remote.cmd_applyCorrection.start(timeout=STD_TIMEOUT)
 
-                # Give control back to event loop so it can gather remaining callbacks
+                # Give control back to event loop so it can gather remaining
+                # callbacks
                 await asyncio.sleep(7 * salobj.base_csc.HEARTBEAT_INTERVAL)
 
                 logger.debug("Check that callbacks where called")
@@ -321,7 +328,8 @@ class TestCSC(unittest.TestCase):
 
                 harness.aos_remote.evt_detailedState.callback.assert_called()
 
-                # Check that events where published with the correct az/el position
+                # Check that events where published with the correct az/el
+                # position
                 m1_start = await harness.aos_remote.evt_m1CorrectionStarted.next(flush=False,
                                                                                  timeout=STD_TIMEOUT)
                 m2_start = await harness.aos_remote.evt_m2CorrectionStarted.next(flush=False,
@@ -361,8 +369,9 @@ class TestCSC(unittest.TestCase):
                     ats_end = await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
                         flush=False,
                         timeout=STD_TIMEOUT)
-                    # pointing offsets only get published if they change, so only valid if the spectrograph
-                    # is online, which is why it's inside the else statement
+                    # pointing offsets only get published if they change, so
+                    # only valid if the spectrograph is online, which is why
+                    # it's inside the else statement
                     for component in (ats_start, ats_end):
                         if component is None:
                             continue
@@ -386,9 +395,11 @@ class TestCSC(unittest.TestCase):
                         self.assertEqual(component.elevation, elevation)
 
                 # Check how many times the detailed state bit was flipped
-                # Should be a transition per component (2 flips), except the spectrograph calls the hexapod,
-                # so it's actually 4*2+2 = 10 detailed state transitions.
-                # hexapod nor spectrograph function while exposing, so only the mirrors should flip.
+                # Should be a transition per component (2 flips), except
+                # the spectrograph calls the hexapod, so it's actually
+                # 4*2+2 = 10 detailed state transitions.
+                # hexapod nor spectrograph function while exposing, so only
+                # the mirrors should flip.
                 self.assertEqual(
                     len(harness.aos_remote.evt_detailedState.callback.call_args_list),
                     10 if not while_exposing else 4,
@@ -418,8 +429,9 @@ class TestCSC(unittest.TestCase):
 
             async with Harness() as harness:
 
-                # if there is nothing (atpneumatics/atspectrograph) sending events then this command times out
-                # need to extend the timeout in this case.
+                # if there is nothing (atpneumatics/atspectrograph) sending
+                # events then this command times out need to extend the
+                # timeout in this case.
                 await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=60)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
@@ -469,7 +481,8 @@ class TestCSC(unittest.TestCase):
         asyncio.get_event_loop().run_until_complete(doit())
 
     def test_spectrograph_offsets(self):
-        """Test offsets command and handling of offsets during filter/grating changes."""
+        """Test offsets command and handling of offsets during filter/grating
+         changes."""
 
         async def doit(atspectrograph=True,
                        online_before_ataos=False):
@@ -502,9 +515,9 @@ class TestCSC(unittest.TestCase):
                 harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
                 harness.atptg.cmd_offsetAzEl.callback = Mock(wraps=mount_offset_callback)
 
-                # Can only set these if the spectrograph is not going to come online
-                # if it goes offline the values will remain and no new filter/disperser
-                # positions will get published
+                # Can only set these if the spectrograph is not going to come
+                # online if it goes offline the values will remain and no new
+                # filter/disperser positions will get published
                 if atspectrograph:
                     filter_name, filter_name2 = 'test_filt1', 'test_filt2'
                     filter_position, filter_position2 = 1, 2
@@ -518,7 +531,9 @@ class TestCSC(unittest.TestCase):
                     disperser_focus_offset, disperser_focus_offset2 = 0.1, 0.0
                     disperser_pointing_offsets = np.array([0.05, -0.05])
                     disperser_pointing_offsets2 = np.array([0.13, -0.13])
-                else:  # These are needed for testing purposes when the spectrograph is offline.
+                else:
+                    # These are needed for testing purposes when the
+                    # spectrograph is offline.
                     filter_name, filter_name2 = '', ''
                     filter_focus_offset, filter_focus_offset2 = 0.0, 0.0
                     filter_central_wavelength, filter_central_wavelength2 = 0.0, 0.0
@@ -548,16 +563,17 @@ class TestCSC(unittest.TestCase):
                     )
                     logger.debug('Awaiting here for 1s')
                     await asyncio.sleep(1)
-                # If the atpneumatics and atspectrograph sending events then this command times out
-                # when using the default timeout, therefore it is extended here to account for that
-                # case.
+                # If the atpneumatics and atspectrograph sending events then
+                # this command times out when using the default timeout,
+                # therefore it is extended here to account for that case.
 
                 await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=60)
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
                 # send elevation/azimuth positions
                 azimuth = np.random.uniform(0., 360.)
-                # make sure it is never zero because np.random.uniform is [min, max)
+                # make sure it is never zero because np.random.uniform is
+                # [min, max)
                 elevation = 90. - np.random.uniform(0., 90.)
 
                 await publish_mountEncoders(harness, azimuth, elevation, ntimes=5)
@@ -568,8 +584,8 @@ class TestCSC(unittest.TestCase):
                     # Bring spectrograph online and load filter/disperser
                     harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
 
-                    # the summarystate causes offsets to be published, so flush these to be sure the grab
-                    # the proper one below
+                    # the summarystate causes offsets to be published, so
+                    # flush these to be sure the grab the proper one below
                     harness.aos_remote.evt_correctionOffsets.flush()
                     harness.aos_remote.evt_focusOffsetSummary.flush()
 
@@ -594,11 +610,13 @@ class TestCSC(unittest.TestCase):
                     logger.debug('Enabling atspectrograph and hexapod corrections')
                     await harness.aos_remote.cmd_enableCorrection.set_start(atspectrograph=True,
                                                                             hexapod=True)
-                    # let the loop turn a few times, this can take awhile to apply all corrections
-                    # you might also get two of each event depending on race conditions.
+                    # let the loop turn a few times, this can take awhile to
+                    # apply all corrections you might also get two of each
+                    # event depending on race conditions.
                     await asyncio.sleep(6)
-                    # check spectrograph pointing accounting is being done correctly, but this only gets
-                    # published if the spectrograph is online
+                    # check spectrograph pointing accounting is being done
+                    # correctly, but this only gets published if the
+                    # spectrograph is online
 
                     pointingOffsetSummary = await harness.aos_remote.evt_pointingOffsetSummary.next(
                         flush=False,
@@ -613,8 +631,8 @@ class TestCSC(unittest.TestCase):
                     self.assertAlmostEqual(correctionOffsets.z, filter_focus_offset + disperser_focus_offset)
                     self.assertAlmostEqual(focusOffsetSummary.total,
                                            disperser_focus_offset + filter_focus_offset)
-                    # Check pointingOffsets is correct, but note they are arrays.
-                    # Must loop over values individually
+                    # Check pointingOffsets is correct, but note they are
+                    # arrays. Must loop over values individually
                     for n in range(len(pointingOffsetSummary.total) - 1):
                         self.assertAlmostEqual(pointingOffsetSummary.filter[n],
                                                filter_pointing_offsets[n])
@@ -627,8 +645,8 @@ class TestCSC(unittest.TestCase):
                                                                              atspectrograph=True)
 
                 else:
-                    # offsets from filter/dispersers should not yet be applied if correction loop for
-                    # spectrograph isn't on
+                    # offsets from filter/dispersers should not yet be
+                    # applied if correction loop for spectrograph isn't on
                     self.assertAlmostEqual(correctionOffsets.z, 0.0)
                     self.assertAlmostEqual(focusOffsetSummary.total,
                                            0.0)
@@ -647,8 +665,8 @@ class TestCSC(unittest.TestCase):
                           'v': 1.7
                           }
 
-                # Now start the loops, we'll then add an offset, then remove a filter, then remove
-                # a disperser
+                # Now start the loops, we'll then add an offset,
+                # then remove a filter, then remove a disperser
                 if atspectrograph:
                     logger.debug('Re-enabling atspectrograph and hexapod corrections')
                     await harness.aos_remote.cmd_enableCorrection.set_start(atspectrograph=True,
@@ -676,7 +694,8 @@ class TestCSC(unittest.TestCase):
                             self.assertAlmostEqual(offset[axis],
                                                    getattr(offset_applied, axis))
                         else:
-                            # should be applied offset plus the filter/disperser offsets
+                            # should be applied offset plus the
+                            # filter/disperser offsets
                             self.assertAlmostEqual(
                                 offset[axis] + disperser_focus_offset + filter_focus_offset,
                                 getattr(offset_applied, axis))
@@ -689,7 +708,8 @@ class TestCSC(unittest.TestCase):
                 self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset)
                 self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset)
 
-                # This part of the test is only applicable if the spectrograph is online
+                # This part of the test is only applicable if the spectrograph
+                # is online
                 if atspectrograph:
                     logger.debug('Putting in filter2')
                     # flush events then change filters
@@ -705,7 +725,8 @@ class TestCSC(unittest.TestCase):
                         pointingOffsets=filter_pointing_offsets2
                     )
 
-                    # need to wait for loop to apply offsets, can take ~5s for pointing offsets
+                    # need to wait for loop to apply offsets, can take ~5s
+                    # for pointing offsets
                     await asyncio.sleep(5)
                     await harness.aos_remote.evt_atspectrographCorrectionStarted.aget(timeout=STD_TIMEOUT)
                     await harness.aos_remote.evt_atspectrographCorrectionCompleted.aget(
@@ -727,7 +748,8 @@ class TestCSC(unittest.TestCase):
                         timeout=STD_TIMEOUT)
 
                     # offsets should be combined in z
-                    # this could be made a function, but I found this easier to read/parse/understand
+                    # this could be made a function, but I found this easier
+                    # to read/parse/understand
                     for axis in offset:
 
                         with self.subTest(axis=axis):
@@ -735,7 +757,8 @@ class TestCSC(unittest.TestCase):
                                 self.assertAlmostEqual(offset[axis],
                                                        getattr(offset_applied, axis))
                             else:
-                                # should be applied offset plus the filter/disperser offsets
+                                # should be applied offset plus the
+                                # filter/disperser offsets
                                 self.assertAlmostEqual(
                                     offset[axis] + disperser_focus_offset + filter_focus_offset2,
                                     getattr(offset_applied, axis))
@@ -748,8 +771,8 @@ class TestCSC(unittest.TestCase):
                     self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset2)
                     self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset)
 
-                    # Check pointingOffsets is correct, but note they are arrays.
-                    # Must loop over values individually
+                    # Check pointingOffsets is correct, but note they are
+                    # arrays. Must loop over values individually
                     for n in range(len(pointingOffsetSummary.total) - 1):
                         self.assertAlmostEqual(pointingOffsetSummary.filter[n],
                                                filter_pointing_offsets2[n])
@@ -798,7 +821,8 @@ class TestCSC(unittest.TestCase):
                                 self.assertAlmostEqual(offset[axis],
                                                        getattr(offset_applied, axis))
                             else:
-                                # should be applied offset plus the filter/disperser offsets
+                                # should be applied offset plus the
+                                # filter/disperser offsets
                                 self.assertAlmostEqual(
                                     offset[axis] + disperser_focus_offset2 + filter_focus_offset2,
                                     getattr(offset_applied, axis))
@@ -811,8 +835,8 @@ class TestCSC(unittest.TestCase):
                     self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset2)
                     self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset2)
 
-                    # Check pointingOffsets is correct, but note they are arrays.
-                    # Must loop over values individually
+                    # Check pointingOffsets is correct, but note they are
+                    # arrays. Must loop over values individually
                     for n in range(len(pointingOffsetSummary.total) - 1):
                         self.assertAlmostEqual(pointingOffsetSummary.filter[n],
                                                filter_pointing_offsets2[n])
@@ -839,7 +863,8 @@ class TestCSC(unittest.TestCase):
                         if axis != 'z':
                             self.assertAlmostEqual(0.0, getattr(offset_applied, axis))
                         else:
-                            # correction offset should be zero plus the filter/disperser offsets
+                            # correction offset should be zero plus the
+                            # filter/disperser offsets
                             self.assertAlmostEqual(0.0 + disperser_focus_offset2 + filter_focus_offset2,
                                                    getattr(offset_applied, axis))
                 # totals should be just filter/disperser offsets
@@ -851,8 +876,8 @@ class TestCSC(unittest.TestCase):
                 self.assertAlmostEqual(focusOffsetSummary.disperser, disperser_focus_offset2)
 
                 if atspectrograph:
-                    # Check pointingOffsets is correct, but note they are arrays.
-                    # Must loop over values individually
+                    # Check pointingOffsets is correct, but note they are
+                    # arrays. Must loop over values individually
                     for n in range(len(pointingOffsetSummary.total) - 1):
                         self.assertAlmostEqual(pointingOffsetSummary.filter[n],
                                                filter_pointing_offsets2[n])
@@ -885,7 +910,8 @@ class TestCSC(unittest.TestCase):
         logger.debug('COMPLETED test with spectrograph offline \n')
 
     def test_enable_disable_corrections(self):
-        """Test enabling and disabling corrections, one at a time, then all at once."""
+        """Test enabling and disabling corrections, one at a time,
+         then all at once."""
 
         async def doit(telescope_online=False):
 
@@ -952,7 +978,8 @@ class TestCSC(unittest.TestCase):
                 )
 
                 # Put ataos in enabled state
-                # extend the timeout, to account for if all events aren't set yet
+                # extend the timeout, to account for if all events aren't
+                # set yet
                 await asyncio.sleep(1)
 
                 await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED, timeout=80)
@@ -977,8 +1004,9 @@ class TestCSC(unittest.TestCase):
                 logger.debug('Starting to loop over enabling corrections')
                 for corr in corrections:
                     expected_corrections[corr] = True
-                    # Note: Setting only the correction I want to enable. Any correction already
-                    # enabled will be left unchanged. This is part of the test.
+                    # Note: Setting only the correction I want to enable.
+                    # Any correction already enabled will be left unchanged.
+                    # This is part of the test.
                     logger.debug(f'Enabling correction {corr}')
 
                     # flush correctionEnabled event
@@ -999,10 +1027,12 @@ class TestCSC(unittest.TestCase):
                         timeout=STD_TIMEOUT
                     )
 
-                    # let the loop turn a few times to make sure it doesn't crash
+                    # let the loop turn a few times to make sure it's stable
+                    # crash
                     logger.debug(f'Correction {corr} enabled')
 
-                    # This is inefficient but leaving it for ease of readability
+                    # This is inefficient but leaving it for ease of
+                    # readability
                     if telescope_online:
                         if corr == "m1":
                             await harness.aos_remote.evt_m1CorrectionStarted.aget(timeout=STD_TIMEOUT)
@@ -1038,7 +1068,8 @@ class TestCSC(unittest.TestCase):
                             pointingOffsetSummary = await harness.aos_remote.evt_pointingOffsetSummary.next(
                                 flush=False,
                                 timeout=STD_TIMEOUT)
-                            # pointingOffsets are arrays, so loop over values individually
+                            # pointingOffsets are arrays, so loop over values
+                            # individually
                             for n in range(len(pointingOffsetSummary.total)-1):
                                 self.assertAlmostEqual(pointingOffsetSummary.filter[n],
                                                        filterPointingOffsets[n])
@@ -1047,8 +1078,8 @@ class TestCSC(unittest.TestCase):
                                 self.assertAlmostEqual(pointingOffsetSummary.total[n],
                                                        filterPointingOffsets[n]+gratingPointingOffsets[n])
                     else:
-                        # when the telescope is offline, the m1 and m2 loops can still run and should not
-                        # raise an exception
+                        # when the telescope is offline, the m1 and m2 loops
+                        # can still run and should not raise an exception
                         if corr == "m1":
                             harness.pnematics.cmd_m1SetPressure.callback.assert_called()
                             harness.pnematics.cmd_m1OpenAirValve.callback.assert_called()
@@ -1076,9 +1107,12 @@ class TestCSC(unittest.TestCase):
                 # Disable corrections one by one
                 for corr in corrections:
 
-                    expected_corrections[corr] = False  # mark as expected to False
-                    # Note: Setting only the correction I want to disable. Any correction
-                    # already disable will be left unchanged. This is part of the test.
+                    # mark as expected to False
+                    expected_corrections[corr] = False
+                    # Note: Setting only the correction I want to disable.
+                    # Any correction already disabled will be left unchanged.
+                    # This is part of the test.
+
                     # True means I want to disable
                     specific_correction_to_disable = {corr: True}
 
@@ -1113,16 +1147,16 @@ class TestCSC(unittest.TestCase):
                     with self.subTest(test_corr=test_corr):
                         if test_corr == 'moveWhileExposing':
                             self.assertFalse(getattr(correctionEnabledEvent, test_corr),
-                                             f"Failed to set correction for moveWhileExposing. "
-                                             f"Expected True, "
+                                             "Failed to set correction for moveWhileExposing. "
+                                             "Expected True, "
                                              f"got {getattr(correctionEnabledEvent, test_corr)}")
                         else:
                             self.assertTrue(getattr(correctionEnabledEvent, test_corr),
-                                            f"Failed to set correction for {test_corr}. "
-                                            f"Expected True, "
+                                            "Failed to set correction for {test_corr}. "
+                                            "Expected True, "
                                             f"got {getattr(correctionEnabledEvent, test_corr)}")
 
-                logger.debug(f'All corrections should be enabled except moveWhileExposing:\n'
+                logger.debug('All corrections should be enabled except moveWhileExposing:\n'
                              f' {correctionEnabledEvent}')
 
                 logger.debug('Everything should be enabled except moveWhileExposing, '
@@ -1137,8 +1171,8 @@ class TestCSC(unittest.TestCase):
                 for test_corr in corrections:
                     with self.subTest(test_corr=test_corr):
                         self.assertFalse(getattr(correctionEnabledEvent, test_corr),
-                                         f"Failed to set correction for {test_corr}. "
-                                         f"Expected False, "
+                                         "Failed to set correction for {test_corr}. "
+                                         "Expected False, "
                                          f"got {getattr(correctionEnabledEvent, test_corr)}")
 
                 logger.debug(
