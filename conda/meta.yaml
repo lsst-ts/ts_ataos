@@ -33,6 +33,7 @@ test:
     - ts-dds
     - ts-idl
     - ts-salobj
+    - ts-observatory-control
   source_files:
     - python
     - bin.src
@@ -55,3 +56,4 @@ requirements:
     - setuptools_scm
     - ts-salobj
     - ts-idl
+    - ts-observatory-control

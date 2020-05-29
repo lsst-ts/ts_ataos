@@ -467,7 +467,9 @@ class TestCSC(unittest.TestCase):
                         self.assertEqual(offset[axis],
                                          getattr(offset_applied, axis))
 
-                await harness.aos_remote.cmd_resetOffset.start(timeout=STD_TIMEOUT)
+                # Standard timeout sometimes isn't quite long enough for this,
+                # so doubling it.
+                await harness.aos_remote.cmd_resetOffset.start(timeout=STD_TIMEOUT*2)
 
                 offset_reset = await harness.aos_remote.evt_correctionOffsets.next(
                     flush=False,
