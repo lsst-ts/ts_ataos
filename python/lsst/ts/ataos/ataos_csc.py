@@ -87,25 +87,7 @@ class ATAOS(ConfigurableCsc):
 
         self.camera_exposing = False  # flag to monitor if camera is exposing
 
-        # Remotes
-        self.mcs = Remote(self.domain, "ATMCS", include=["target", "mount_AzEl_Encoders"])
-        self.pneumatics = Remote(self.domain, "ATPneumatics", include=["m1SetPressure",
-                                                                       "m2SetPressure",
-                                                                       "m1OpenAirValve",
-                                                                       "m2OpenAirValve",
-                                                                       "m1CloseAirValve",
-                                                                       "m2CloseAirValve",
-                                                                       "openMasterAirSupply",
-                                                                       "openInstrumentAirValve",
-                                                                       "m1State",
-                                                                       "m2State",
-                                                                       "instrumentState",
-                                                                       "mainValveState",
-                                                                       "summaryState",
-                                                                       "m1AirPressure",
-                                                                       "m2AirPressure"])
-
-        self.hexapod = Remote(self.domain, "ATHexapod", include=["moveToPosition", "positionUpdate"])
+        # Create Remotes
         self.camera = Remote(self.domain, "ATCamera", include=["shutterDetailedState"])
         self.atspectrograph = Remote(self.domain, "ATSpectrograph",
                                      include=["summaryState",
@@ -119,12 +101,6 @@ class ATAOS(ConfigurableCsc):
         self.pneumatics_instrument_valve_state = None
         self.pneumatics_m1_state = None
         self.pneumatics_m2_state = None
-
-        self.target_azimuth = None
-        self.target_elevation = None
-
-        self.azimuth = None
-        self.elevation = None
 
         self.atspectrograph_summary_state = None
         self.current_atspectrograph_filter_name = None
@@ -194,6 +170,51 @@ class ATAOS(ConfigurableCsc):
         self._move_while_exposing = False
 
         self.log.debug("Done __init__")
+
+    # Create a property for all remotes used inside the atcs so the syntax
+    # used to call each remote is the same
+    # note that all remotes in the atcs are lowercase
+    @property
+    def pneumatics(self):
+        return self.atcs.rem.atpneumatics
+
+    @property
+    def mcs(self):
+        return self.atcs.rem.atmcs
+
+    @property
+    def hexapod(self):
+        return self.atcs.rem.athexapod
+
+    # create properties for azimuth/elevation aspects so that callbacks are
+    # not required. These callbacks cause issues inside the ATCS class
+    @property
+    def azimuth(self):
+        if self.atcs.telescope_position is None:
+            return None
+        else:
+            return self.atcs.telescope_position.azimuthCalculatedAngle[-1]
+
+    @property
+    def elevation(self):
+        if self.atcs.telescope_position is None:
+            return None
+        else:
+            return self.atcs.telescope_position.elevationCalculatedAngle[-1]
+
+    @property
+    def target_azimuth(self):
+        if self.atcs.telescope_target is None:
+            return None
+        else:
+            return self.atcs.telescope_target.azimuth
+
+    @property
+    def target_elevation(self):
+        if self.atcs.telescope_target is None:
+            return None
+        else:
+            return self.atcs.telescope_target.elevation
 
     @property
     def detailed_state(self):
@@ -369,12 +390,6 @@ class ATAOS(ConfigurableCsc):
             Command ID and data
         """
 
-        self.log.debug('At beginning of end_enable')
-        # Flush event queue to make sure only current values are accounted for!
-        self.mcs.evt_target.flush()
-
-        self.mcs.tel_mount_AzEl_Encoders.callback = self.update_mount_position_callback
-
         # sets offsets to what they are in the init file, plus any
         # filter/disperser offsets set in begin_start
         self.evt_correctionOffsets.set_put(**self.model.offset,
@@ -399,14 +414,6 @@ class ATAOS(ConfigurableCsc):
             Command ID and data
         """
 
-        self.log.debug('At beginning of end_disable')
-        self.mcs.evt_target.callback = None
-        self.target_elevation = None
-        self.target_azimuth = None
-
-        self.mcs.tel_mount_AzEl_Encoders.callback = None
-        self.azimuth = None
-        self.elevation = None
         if not self.correction_loop_task.done():
             self.correction_loop_task.cancel()
 
@@ -820,7 +827,7 @@ class ATAOS(ConfigurableCsc):
                     # the loop running (but just sleeping) is acceptable and
                     # allows cycling of components.
                     self.log.debug("No information available about telescope azimuth and/or "
-                                   "elevation, m1, m2, hexapod cannot occur ")
+                                   "elevation, m1, m2, hexapod corrections cannot occur ")
 
                 # FIXME:
                 # Run corrections in series because CSCs are not supporting
@@ -1254,7 +1261,6 @@ class ATAOS(ConfigurableCsc):
 
         if self.can_move():
             # publish new detailed state
-
             self.log.debug("Applying Spectrograph Corrections, if required")
 
             status_bit = DetailedState.ATSPECTROGRAPH
@@ -1309,7 +1315,7 @@ class ATAOS(ConfigurableCsc):
             self.detailed_state = self.detailed_state ^ status_bit
 
             self.log.debug(f'_offset_value is {_offset_value}')
-            self.log.debug(f'_pointing_offsets is {_pointing_offsets}')
+            self.log.debug(f'_pointing_offsets is {_pointing_offsets!r}')
 
             # send out even saying correction is started
             self.evt_atspectrographCorrectionStarted.set_put(focusOffset=_offset_value,
@@ -1321,7 +1327,6 @@ class ATAOS(ConfigurableCsc):
                 if abs(_offset_value):
                     self.log.debug('Applying focus correction with hexapod')
                     await self.set_hexapod(azimuth, elevation)
-                    await asyncio.sleep(0)
 
                 if np.max(abs(_pointing_offsets)):
                     self.log.debug('Applying pointing correction _pointing_offsets'
@@ -1351,28 +1356,6 @@ class ATAOS(ConfigurableCsc):
                                                                    pointingOffsets=_pointing_offsets)
                 # correction completed... flip bit on detailedState
                 self.detailed_state = self.detailed_state ^ status_bit
-
-    def update_target_position_callback(self, id_data):
-        """Callback function to update the target telescope position.
-
-        Parameters
-        ----------
-        id_data : SALPY_ATMCS.ATMCS_logevent_target
-
-        """
-        self.target_azimuth = id_data.azimuth
-        self.target_elevation = id_data.elevation
-
-    def update_mount_position_callback(self, id_data):
-        """Callback function to update the position of the telescope.
-
-        Parameters
-        ----------
-        id_data : SALPY_ATMCS.ATMCS_mountEncoders
-
-        """
-        self.azimuth = id_data.azimuthCalculatedAngle[-1]
-        self.elevation = id_data.elevationCalculatedAngle[-1]
 
     @staticmethod
     def get_config_pkg():
@@ -1419,7 +1402,8 @@ class ATAOS(ConfigurableCsc):
 
         """
 
-        self.log.debug('Got new atspectrograph summary state, resetting filter/disperser offsets')
+        self.log.debug(f'Got new atspectrograph summary state State{(data.summaryState)!r},'
+                       ' resetting filter/disperser offsets')
         self.atspectrograph_summary_state = State(data.summaryState)
         # remove offsets from previous spectrograph setup
         self.focus_offset_yet_to_be_applied += -self.focus_offset_per_category['filter']
@@ -1438,7 +1422,7 @@ class ATAOS(ConfigurableCsc):
         """ Check that the atspectrograph is online and enabled"""
         if self.atspectrograph_summary_state != State.ENABLED:
             raise RuntimeError(f"ATSpectrograph (LATISS) in {self.atspectrograph_summary_state}. "
-                               f"Expected {State.ENABLED}. Enable CSC before "
+                               f"Expected {State.ENABLED!r}. Enable CSC before "
                                "activating corrections.")
 
     async def check_atpneumatic(self):
@@ -1448,7 +1432,7 @@ class ATAOS(ConfigurableCsc):
 
         if self.pneumatics_summary_state != State.ENABLED:
             raise RuntimeError(f"ATPneumatics in {self.pneumatics_summary_state}. "
-                               f"Expected {State.ENABLED}. Enable CSC before "
+                               f"Expected {State.ENABLED!r}. Enable CSC before "
                                "activating corrections.")
 
         if self.pneumatics_main_valve_state != ATPneumatics.AirValveState.OPENED:
@@ -1489,7 +1473,6 @@ class ATAOS(ConfigurableCsc):
         """
 
         # Disable corrections
-        self.mcs.evt_target.callback = None
         disable_corr = self.cmd_disableCorrection.DataType()
         disable_corr.disableAll = True
         self.mark_corrections(disable_corr, False)
@@ -1550,4 +1533,5 @@ class ATAOS(ConfigurableCsc):
 
     async def close(self):
 
+        await self.atcs.close()
         await super().close()
