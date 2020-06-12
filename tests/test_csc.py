@@ -24,7 +24,7 @@ TEST_CONFIG_DIR = pathlib.Path(__file__).parents[1].joinpath("tests", "data", "c
 
 
 class Harness:
-    def __init__(self, config_dir=None):
+    def __init__(self, config_dir=TEST_CONFIG_DIR):
         salobj.test_utils.set_random_lsst_dds_domain()
         self.csc = ataos_csc.ATAOS(config_dir=config_dir)
 
@@ -1191,9 +1191,197 @@ class TestCSC(unittest.TestCase):
         logger.debug('\n Starting test_enable_disable_corrections with telescope position published')
         asyncio.get_event_loop().run_until_complete(doit(telescope_online=True))
 
+    def test_target_handling(self):
+        """Test changing of targets to verify pressures are adjusted correctly
+
+        """
+
+        async def doit():
+
+            async with Harness() as harness:
+
+                def callback(data):
+                    pass
+
+                def m1_open_callback(data):
+                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.OPENED)
+
+                def m2_open_callback(data):
+                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.OPENED)
+
+                def m1_close_callback(data):
+                    harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
+
+                def m2_close_callback(data):
+                    harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
+
+                # set the hexapod callback
+                def hexapod_move_callback(data):
+                    harness.hexapod.evt_positionUpdate.put()
+
+                harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
+                harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
+                harness.pnematics.cmd_m1OpenAirValve.callback = Mock(wraps=m1_open_callback)
+                harness.pnematics.cmd_m2OpenAirValve.callback = Mock(wraps=m2_open_callback)
+                harness.pnematics.cmd_m1CloseAirValve.callback = Mock(wraps=m1_close_callback)
+                harness.pnematics.cmd_m2CloseAirValve.callback = Mock(wraps=m2_close_callback)
+                harness.hexapod.cmd_moveToPosition.callback = Mock(wraps=hexapod_move_callback)
+
+                harness.pnematics.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+                harness.pnematics.evt_mainValveState.set_put(state=ATPneumatics.AirValveState.OPENED)
+                harness.pnematics.evt_instrumentState.set_put(state=ATPneumatics.AirValveState.OPENED)
+                harness.pnematics.evt_m1State.set_put(state=ATPneumatics.AirValveState.CLOSED)
+                harness.pnematics.evt_m2State.set_put(state=ATPneumatics.AirValveState.CLOSED)
+
+                # report atspectrograph status
+                harness.atspectrograph.evt_summaryState.set_put(summaryState=salobj.State.ENABLED)
+                filterFocusOffset, disperserFocusOffset = 0.1, 0.05
+                # Set offsets to zero to make assertions easier
+                filterPointingOffsets = np.array([0.0, 0.00])
+                gratingPointingOffsets = np.array([0.0, 0.])
+
+                harness.atspectrograph.evt_reportedFilterPosition.set_put(
+                    name='filter1',
+                    position=1,
+                    centralWavelength=701.5,
+                    focusOffset=filterFocusOffset,
+                    pointingOffsets=filterPointingOffsets
+                )
+                harness.atspectrograph.evt_reportedDisperserPosition.set_put(
+                    name='disperser2',
+                    position=1,
+                    focusOffset=disperserFocusOffset,
+                    pointingOffsets=gratingPointingOffsets
+                )
+
+                # Put ataos in enabled state
+                # extend the timeout, to account for if all events aren't
+                # set yet
+                await asyncio.sleep(1)
+
+                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED,
+                                               settingsToApply='current', timeout=80)
+                self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
+
+                # Verify the elevation and azimuth positions and
+                # targets are at none
+                self.assertEqual(harness.csc.elevation, None)
+                self.assertEqual(harness.csc.target_elevation, None)
+                self.assertEqual(harness.csc.azimuth, None)
+                self.assertEqual(harness.csc.target_azimuth, None)
+
+                logger.debug('Enable all corrections')
+                await harness.aos_remote.cmd_enableCorrection.set_start(enableAll=True,
+                                                                        moveWhileExposing=False)
+
+                logger.debug('Send a target')
+                t_el = 80.0
+                t_az = 70.0
+                t_nas2 = t_az
+                harness.atmcs.evt_target.set_put(elevation=t_el, azimuth=t_az, nasmyth2RotatorAngle=t_nas2)
+                await asyncio.sleep(2)
+                # Verify the elevation and azimuth positions and targets
+                # are at none
+                self.assertEqual(harness.csc.elevation, None)
+                self.assertEqual(harness.csc.target_elevation, t_el)
+                self.assertEqual(harness.csc.azimuth, None)
+                self.assertEqual(harness.csc.target_azimuth, t_az)
+
+                logger.debug('Send a telescope position')
+                await publish_mountEncoders(harness, t_az, t_el, ntimes=2)
+                await asyncio.sleep(3)
+                self.assertEqual(harness.csc.elevation, t_el)
+                self.assertEqual(harness.csc.target_elevation, t_el)
+                self.assertEqual(harness.csc.azimuth, t_az)
+                self.assertEqual(harness.csc.target_azimuth, t_az)
+
+                logger.debug('Send a lower telescope position')
+                # Want to check that pressure is decreased faster than the
+                # model value for the current position so the mirror
+                # doesn't lift
+                t_el2 = 40.0
+                harness.atmcs.evt_target.set_put(elevation=t_el2, azimuth=t_az, nasmyth2RotatorAngle=t_nas2)
+                await asyncio.sleep(5)
+                self.assertEqual(harness.csc.elevation, t_el)
+                self.assertEqual(harness.csc.target_elevation, t_el2)
+                self.assertEqual(harness.csc.azimuth, t_az)
+                self.assertEqual(harness.csc.target_azimuth, t_az)
+
+                # Check that m1 pressure is not equal to current position
+                m1_pressure_expected_to_be_commanded = harness.csc.model.get_correction_m1(
+                    t_az, (t_el + t_el2) / 2.0)
+
+                # returns a call object, so need to take the first call,
+                # then the value of the tuple, then the pressure value
+                commanded_pressure = (
+                    ((harness.pnematics.cmd_m1SetPressure.callback.call_args)[0])[0]).pressure
+                self.assertEqual(commanded_pressure, m1_pressure_expected_to_be_commanded)
+
+                logger.debug('Update telescope position to intermediate position')
+                t_el_1b = 45.0
+                await publish_mountEncoders(harness, t_az, t_el_1b, ntimes=2)
+                await asyncio.sleep(2)
+                self.assertEqual(harness.csc.elevation, t_el_1b)
+                self.assertEqual(harness.csc.target_elevation, t_el2)
+                self.assertEqual(harness.csc.azimuth, t_az)
+                self.assertEqual(harness.csc.target_azimuth, t_az)
+
+                # Check that m1 pressure is not equal to current position
+                m1_pressure_expected_to_be_commanded = harness.csc.model.get_correction_m1(
+                    t_az, (t_el_1b + t_el2) / 2.0)
+                commanded_pressure = (((
+                    harness.pnematics.cmd_m1SetPressure.callback.call_args)[0])[0]).pressure
+                self.assertEqual(commanded_pressure, m1_pressure_expected_to_be_commanded)
+
+                logger.debug('Update telescope position to be target position')
+                await publish_mountEncoders(harness, t_az, t_el2, ntimes=2)
+                await asyncio.sleep(2)
+                self.assertEqual(harness.csc.elevation, t_el2)
+                self.assertEqual(harness.csc.target_elevation, t_el2)
+                self.assertEqual(harness.csc.azimuth, t_az)
+                self.assertEqual(harness.csc.target_azimuth, t_az)
+
+                # Check that m1 pressure is not equal to current position
+                m1_pressure_expected_to_be_commanded = harness.csc.model.get_correction_m1(
+                    t_az, t_el2)
+                commanded_pressure = (
+                    ((harness.pnematics.cmd_m1SetPressure.callback.call_args)[0])[0]).pressure
+                self.assertEqual(commanded_pressure, m1_pressure_expected_to_be_commanded)
+
+                logger.debug('Send target for original position')
+                harness.atmcs.evt_target.set_put(elevation=t_el, azimuth=t_az, nasmyth2RotatorAngle=t_nas2)
+
+                logger.debug('Update telescope position to intermediate position')
+                t_el_1b = 45.0
+                await publish_mountEncoders(harness, t_az, t_el_1b, ntimes=2)
+                await asyncio.sleep(3)
+
+                self.assertEqual(harness.csc.elevation, t_el_1b)
+                self.assertEqual(harness.csc.target_elevation, t_el)
+                self.assertEqual(harness.csc.azimuth, t_az)
+                self.assertEqual(harness.csc.target_azimuth, t_az)
+
+                # Check that m1 pressure is not equal to current position
+                # On the way up the air pressure follows telescope position
+                m1_pressure_expected_to_be_commanded = harness.csc.model.get_correction_m1(
+                    t_az, t_el_1b)
+                commanded_pressure = (
+                    ((harness.pnematics.cmd_m1SetPressure.callback.call_args)[0])[0]).pressure
+                self.assertEqual(commanded_pressure, m1_pressure_expected_to_be_commanded)
+
+                logger.debug('Switch corrections off')
+                harness.aos_remote.cmd_disableCorrection.set(disableAll=True)
+                await asyncio.sleep(3)
+
+        logger.debug('\n Starting test_target_handling')
+        asyncio.get_event_loop().run_until_complete(doit())
+        logger.debug('\n test_target_handling - COMPLETED \n')
+
 
 async def publish_mountEncoders(harness, azimuth, elevation, ntimes=5):
-    """Publish telescope position as an event"""
+    """Publish telescope position as an event.
+    Nasmyth values are just equal to azimuth
+    """
 
     # arrays need to have a length of 100 values
     for i in range(ntimes):

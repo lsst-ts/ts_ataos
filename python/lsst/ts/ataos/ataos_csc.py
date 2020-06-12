@@ -10,7 +10,7 @@ from lsst.ts.salobj import (base_csc, ConfigurableCsc, Remote, State,
 
 from lsst.ts.idl.enums import ATPneumatics
 
-from lsst.ts.observatory.control import ATCS, ATCSUsages
+from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
 
 from .model import Model
 
@@ -1333,7 +1333,7 @@ class ATAOS(ConfigurableCsc):
                                    f' = {_pointing_offsets} with atcs')
                     # apply offsets relative to what is already there
                     await self.atcs.offset_xy(_pointing_offsets[0], _pointing_offsets[1],
-                                              relative=True)
+                                              relative=True, persistent=True)
                     await asyncio.sleep(0)
                     # update accounting and remove the already applied offsets
                     self.pointing_offsets_per_category['total'] += _pointing_offsets
@@ -1347,9 +1347,8 @@ class ATAOS(ConfigurableCsc):
                         disperser=self.pointing_offsets_per_category['disperser'])
 
             except Exception as e:
-                self.log.warning(f"Failed to apply spectrograph pointing offsets of {_pointing_offsets} or "
-                                 f"failed to apply focus (hexapod offset) of : {_offset_value}")
-                self.log.exception(e)
+                self.log.exception(f"Failed to apply spectrograph pointing offsets of {_pointing_offsets} or "
+                                   f"failed to apply focus (hexapod offset) of : {_offset_value}")
                 raise e
             finally:
                 self.evt_atspectrographCorrectionCompleted.set_put(focusOffset=_offset_value,
@@ -1406,16 +1405,16 @@ class ATAOS(ConfigurableCsc):
                        ' resetting filter/disperser offsets')
         self.atspectrograph_summary_state = State(data.summaryState)
         # remove offsets from previous spectrograph setup
-        self.focus_offset_yet_to_be_applied += -self.focus_offset_per_category['filter']
+        self.focus_offset_yet_to_be_applied = -self.focus_offset_per_category['filter']
         self.focus_offset_per_category['filter'] = 0.0
 
-        self.focus_offset_yet_to_be_applied += -self.focus_offset_per_category['disperser']
+        self.focus_offset_yet_to_be_applied -= self.focus_offset_per_category['disperser']
         self.focus_offset_per_category['disperser'] = 0.0
 
-        self.pointing_offsets_yet_to_be_applied += -self.pointing_offsets_per_category['filter']
+        self.pointing_offsets_yet_to_be_applied -= self.pointing_offsets_per_category['filter']
         self.pointing_offsets_per_category['filter'] = np.array([0.0, 0.0])
 
-        self.pointing_offsets_yet_to_be_applied += -self.pointing_offsets_per_category['disperser']
+        self.pointing_offsets_yet_to_be_applied -= self.pointing_offsets_per_category['disperser']
         self.pointing_offsets_per_category['disperser'] = np.array([0.0, 0.0])
 
     async def check_atspectrograph(self):
@@ -1535,3 +1534,5 @@ class ATAOS(ConfigurableCsc):
 
         await self.atcs.close()
         await super().close()
+        await self.camera.close()
+        await self.atspectrograph.close()
