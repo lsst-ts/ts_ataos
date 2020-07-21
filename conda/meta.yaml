@@ -26,6 +26,7 @@ test:
     - asynctest
     - numpy
     - astropy
+    - astroquery
     - jsonschema
     - pyyaml
     - boto3
@@ -54,6 +55,7 @@ requirements:
     - python
     - setuptools
     - setuptools_scm
+    - astroquery
     - ts-salobj
     - ts-idl
     - ts-observatory-control

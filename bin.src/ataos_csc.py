@@ -5,10 +5,16 @@ import argparse
 
 from lsst.ts.ataos import ataos_csc, version
 
-parser = argparse.ArgumentParser(f"Start the ATAOS CSC")
+parser = argparse.ArgumentParser("Start the ATAOS CSC")
 parser.add_argument("--version", action="version", version=version.__version__)
-parser.add_argument("-v", "--verbose", dest="verbose", action='count', default=0,
-                    help="Set the verbosity for console logging.")
+parser.add_argument(
+    "-v",
+    "--verbose",
+    dest="verbose",
+    action="count",
+    default=0,
+    help="Set the verbosity for console logging.",
+)
 
 args = parser.parse_args()
 

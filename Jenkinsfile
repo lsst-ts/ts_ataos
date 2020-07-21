@@ -6,7 +6,16 @@ pipeline {
         user_ci = credentials('lsst-io')
         work_branches = "${GIT_BRANCH} ${CHANGE_BRANCH} develop"
     }
-
+    options {
+        buildDiscarder(
+            logRotator(
+                artifactDaysToKeepStr: '',
+                artifactNumToKeepStr: '',
+                daysToKeepStr: '14',
+                numToKeepStr: '10'
+            ))
+        disableConcurrentBuilds()
+    }
     stages {
         stage("Pull docker image") {
             steps {
