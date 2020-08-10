@@ -1,5 +1,5 @@
-
 import numpy as np
+import logging
 
 __all__ = ['Model']
 
@@ -13,15 +13,23 @@ class Model:
     cos(theta), where theta is the azimuth distance or 90.-altitude.
 
     """
-    def __init__(self):
+    def __init__(self, log):
+
+        # Create a logger if none were passed during the instantiation of
+        # the class
+        if log is None:
+            self.log = logging.getLogger(type(self).__name__)
+        else:
+            self.log = log.getChild(type(self).__name__)
+
         self.config = {'m1': [0.0],
                        'm2': [0.0],
                        'hexapod_x': [0.0],
                        'hexapod_y': [0.0],
                        'hexapod_z': [0.0],
                        'hexapod_u': [0.0],
-                       'hexapod_v': [0.0]
-                       }
+                       'hexapod_v': [0.0],
+                       'chromatic_dependence': [0.0]}
 
         self.offset = {'m1': 0.0,
                        'm2': 0.0,
@@ -39,6 +47,7 @@ class Model:
         self.poly_z = np.poly1d(self.config['hexapod_z'])
         self.poly_u = np.poly1d(self.config['hexapod_u'])
         self.poly_v = np.poly1d(self.config['hexapod_v'])
+        self.poly_chromatic = np.poly1d(self.config['chromatic_dependence'])
 
     def reset_offset(self):
         """ Reset all offsets to zero.
@@ -160,6 +169,28 @@ class Model:
 
         return x, y, z, u, v, w
 
+    def get_correction_chromatic(self, wavelength):
+        """Focus (via z-hexapod offset) correction for specified wavelength.
+        Note that the central wavelength of the telescope without any
+        filter is 700nm.
+
+        Parameters
+        ----------
+        wavelength : `float`
+            Wavelength for the focus correction (nm).
+
+        Returns
+        -------
+        z-offset : float
+            z-axis focus offset (um)
+        """
+        _chromatic_focus_offset = self.poly_chromatic(wavelength-700)
+
+        self.log.debug('Chromatic_focus offset is '
+                       f'{_chromatic_focus_offset} [mm] for wavelength {wavelength} [nm]')
+
+        return _chromatic_focus_offset
+
     @property
     def m1(self):
         return self.config['m1']
@@ -222,3 +253,12 @@ class Model:
     def hexapod_v(self, val):
         self.config['hexapod_v'] = val
         self.poly_v = np.poly1d(val)
+
+    @property
+    def chromatic_dependence(self):
+        return self.config['chromatic_dependence']
+
+    @chromatic_dependence.setter
+    def chromatic_dependence(self, val):
+        self.config['chromatic_dependence'] = val
+        self.poly_chromatic = np.poly1d(val)

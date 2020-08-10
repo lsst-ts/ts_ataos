@@ -1,21 +1,23 @@
-
 import unittest
 import numpy as np
-
+import logging
 from lsst.ts.ataos import Model
+
+logger = logging.getLogger(__name__)
 
 
 class TestModel(unittest.TestCase):
 
     def test_corrections(self):
 
-        model = Model()
+        model = Model(logger)
 
         # test default configuration
 
         test_altitudes = np.linspace(0., 90., 5)
         test_azimuth = np.linspace(0., 90., 5)
         test_temperatures = np.linspace(-1., 30., 3)
+        test_wavelengths = np.linspace(320., 1100., 10)  # min, max, steps
 
         for alt in test_altitudes:
             for az in test_azimuth:
@@ -39,12 +41,13 @@ class TestModel(unittest.TestCase):
                        'hexapod_z': [np.random.rand()],
                        'hexapod_u': [np.random.rand()],
                        'hexapod_v': [np.random.rand()],
+                       'chromatic_dependence': [np.random.rand()]
                        }
 
         for key in test_config:
             setattr(model, key, test_config[key])
 
-        # correction is a polynome so all values should be equal to the
+        # correction is a polynomial so all values should be equal to the
         # values on test_config
         axis = 'xyzuv'
 
@@ -62,6 +65,15 @@ class TestModel(unittest.TestCase):
                         for i in range(len(axis)):
                             self.assertEqual(test_config[f"hexapod_{axis[i]}"][0],
                                              hexapod[i])
+
+        # Note below that the central wavelength for the telescope
+        # without any filter is 700nm
+        for wave in test_wavelengths:
+            logger.debug(f'test_config value is {test_config["chromatic_dependence"]}')
+
+            with self.subTest(correction="chromatic_dependence", wave=wave):
+                self.assertEqual(test_config["chromatic_dependence"][0],
+                                 model.get_correction_chromatic(wave-700))
 
 
 if __name__ == '__main__':

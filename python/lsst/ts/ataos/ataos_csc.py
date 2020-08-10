@@ -68,7 +68,7 @@ class ATAOS(ConfigurableCsc):
                          config_dir=config_dir,
                          initial_state=initial_state)
 
-        self.model = Model()
+        self.model = Model(self.log)
 
         self._detailed_state = DetailedState.IDLE
 
@@ -80,7 +80,13 @@ class ATAOS(ConfigurableCsc):
         # fast timeout
         self.fast_timeout = 5. * base_csc.HEARTBEAT_INTERVAL
 
+        # Declare contents related to the asyncio lock
+        self.correction_loop_lock = asyncio.Lock()
         self.correction_loop_task = None
+        # Create an Event object that will get set after each
+        # loop iteration
+        self.correction_loop_completed_evt = asyncio.Event()
+
         # Time between corrections
         self.correction_loop_time = base_csc.HEARTBEAT_INTERVAL
 
@@ -104,6 +110,7 @@ class ATAOS(ConfigurableCsc):
         self.atspectrograph_summary_state = None
         self.current_atspectrograph_filter_name = None
         self.current_atspectrograph_disperser_name = None
+        self.current_atspectrograph_central_wavelength = None
         self.focus_offset_yet_to_be_applied = 0.0
         self.pointing_offsets_yet_to_be_applied = np.zeros((2))  # in arcsec
 
@@ -263,6 +270,7 @@ class ATAOS(ConfigurableCsc):
         ----------
         data : `DataType`
             Command data
+
         """
         self.log.debug('At beginning of begin_start')
         if self.pneumatics_summary_state is None:
@@ -361,6 +369,7 @@ class ATAOS(ConfigurableCsc):
             self.pointing_offsets_per_category['filter'] = np.array(filter_data.pointingOffsets)
             self.pointing_offsets_yet_to_be_applied += np.array(filter_data.pointingOffsets)
             self.current_atspectrograph_filter_name = filter_data.name
+            self.current_atspectrograph_central_wavelength = filter_data.centralWavelength
 
         if disperser_data is not None:
             self.focus_offset_per_category['disperser'] = disperser_data.focusOffset
@@ -411,6 +420,7 @@ class ATAOS(ConfigurableCsc):
         ----------
         id_data : `CommandIdData`
             Command ID and data
+
         """
 
         if not self.correction_loop_task.done():
@@ -430,7 +440,7 @@ class ATAOS(ConfigurableCsc):
         self.log.debug('At end of end_disable')
 
     async def do_applyCorrection(self, id_data):
-        """Apply correction based on model (LUTs) on all components
+        """Apply a one-time correction based on model (LUTs) on all components
         either for the current position of the telescope (default) or the
         specified position.
 
@@ -458,6 +468,8 @@ class ATAOS(ConfigurableCsc):
             If angles are outside bounds.
         AssertionError
             If one or more corrections are enabled.
+        RuntimeError
+            If telescope azimuth and/or elevation is not available
         """
 
         self.assert_enabled('applyCorrection')
@@ -503,11 +515,21 @@ class ATAOS(ConfigurableCsc):
     async def do_applyFocusOffset(self, id_data):
         """Applies a relative focus offset to the hexapod position
         correction model. This is a cumulative offset.
+        The movement of the mirror is performed by the loop, not
+        this function.
+
+        The hexapod correction must be enabled to use this command.
 
         Parameters
         ----------
         id_data : `CommandIdData`
             Command ID and data
+
+        Raises
+        ------
+        RuntimeError
+            If hexapod correction is not enabled or a timeout occurred when
+            applying the offsets
 
         Warning
         -------
@@ -517,29 +539,84 @@ class ATAOS(ConfigurableCsc):
         """
         self.assert_enabled('applyFocusOffset')
 
-        self.model.add_offset("z", id_data.offset)
+        # Verify that correction loop is running
+        if not self.corrections['hexapod']:
+            raise RuntimeError('Hexapod correction is not enabled, no focus offset can be applied. '
+                               'Use enableCorrection to enable active correction, then apply the offsets '
+                               'using this command.')
 
-        self.focus_offset_per_category['total'] += id_data.offset
-        self.focus_offset_per_category['userApplied'] = id_data.offset
+        # Lock to apply the offset, which will only happen when the
+        # correction loop is not running, therefore this will ensure
+        # when the next correction occurs it will include the offset
+
+        # Grab the asyncio lock so no offsets can be added while
+        # the corrections are being applied
+
+        async with self.correction_loop_lock:
+
+            # Clear the last correction_loop_completed event
+            self.correction_loop_completed_evt.clear()
+
+            self.model.add_offset("z", id_data.offset)
+
+            self.focus_offset_per_category['total'] += id_data.offset
+            self.focus_offset_per_category['userApplied'] += id_data.offset
+
+        # Lock now released, wait for correction to be applied.
+        try:
+            await asyncio.wait_for(self.correction_loop_completed_evt.wait(), self.cmd_timeout)
+        except asyncio.TimeoutError:
+            raise RuntimeError('Timed out when waiting for correction loop '
+                               'to apply the offsets during the '
+                               'applyFocusOffset command.')
+
+        # Publish new offset values
+        self.evt_correctionOffsets.set_put(**self.model.offset,
+                                           force_output=True)
         self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                             force_output=True)
 
     async def do_setCorrectionModelOffsets(self, id_data):
         """Sets offset to selected model axis correction. These are *NOT* a
         cumulative offsets and will reset whatever values are currently
-        entered.
+        entered. Use with caution.
 
         Any values determined from the spectrograph configuration will also
-        be reset, except pointing offets
+        be reset, except pointing offsets.
+
+        The hexapod correction must be enabled to use this command.
 
         Parameters
         ----------
         id_data : `CommandIdData`
             Command ID and data
-        """
-        self.assert_enabled('applyFocusOffset')
 
-        self.model.set_offset(id_data.axis, id_data.offset)
+        Raises
+        ------
+        RuntimeError
+            If hexapod correction is not enabled.
+        """
+        self.assert_enabled('setCorrectionModelOffsets')
+
+        # Verify that correction loop is running
+        if not self.corrections['hexapod']:
+            raise RuntimeError('Hexapod correction is not enabled, no focus offset can be applied. '
+                               'Use enableCorrection to enable active correction, then apply the offsets '
+                               'using this command.')
+
+        # Grab the asyncio lock so no offsets can be added while
+        # the corrections are being applied
+        async with self.correction_loop_lock:
+
+            self.model.set_offset(id_data.axis, id_data.offset)
+
+            # Wait for correction to be applied.
+            try:
+                await asyncio.wait_for(self.correction_loop_completed_evt.wait(), self.cmd_timeout)
+            except asyncio.TimeoutError:
+                raise RuntimeError('Timed out when waiting for correction loop '
+                                   'to apply the offsets during the '
+                                   'setCorrectionModelOffsets command')
 
         self.evt_correctionOffsets.set_put(**self.model.offset,
                                            force_output=True)
@@ -555,14 +632,24 @@ class ATAOS(ConfigurableCsc):
 
     async def do_offset(self, data):
         """Apply relative offsets to any axis of the model (m1, m2, and
-        hexapod x,y,z,u,v,w).
+        hexapod x,y,z,u,v).
 
         Offsets are cumulative, e.g. if the command is sent twice, with the
         same values you will get double the amount of offset.
 
+        Offsets can only be applied when the correction loop is enabled.
+        Enable corrections using the enableCorrection command.
+
         Parameters
         ----------
-        data
+        data : `object`
+            Contains offsets for each hexapod axis
+
+        Raises
+        ------
+        RuntimeError
+            If appropriate corrections are note enabled or
+            application of offsets by the correction loop times out
 
         Warning
         -------
@@ -572,16 +659,41 @@ class ATAOS(ConfigurableCsc):
         """
         self.assert_enabled('offset')
 
-        for axis in self.model.offset:
-            self.model.add_offset(axis, getattr(data, axis))
+        # Verify that the appropriate correction loop is running
+        # and not all offsets are zero (1e-12 to prevent possible
+        # floating point errors
+        if any([abs(getattr(data, axis)) > 1e-12 for axis in 'xyzuv']) and not self.corrections['hexapod']:
+            raise RuntimeError('Hexapod correction is not enabled. Offsets cannot be applied. '
+                               'See the enableCorrection to close the correction loop.')
+        elif (abs(data.m1) > 1e-12) and not self.corrections['m1']:
+            raise RuntimeError('M1 correction is not enabled. Offset cannot be applied. '
+                               'See the enableCorrection to close the correction loop.')
+        elif (abs(data.m2) > 1e-12) and not self.corrections['m2']:
+            raise RuntimeError('M2 correction is not enabled. Offset cannot be applied. '
+                               'See the enableCorrection to close the correction loop.')
+
+        # Acquire the lock before applying correction
+        async with self.correction_loop_lock:
+            # Add offsets to the model, then release the lock
+            for axis in self.model.offset:
+                self.model.add_offset(axis, getattr(data, axis))
+
+        # Wait for offset to be applied in the loop, first clear past event
+        self.correction_loop_completed_evt.clear()
+
+        try:
+            await asyncio.wait_for(self.correction_loop_completed_evt.wait(), self.cmd_timeout)
+        except asyncio.TimeoutError:
+            raise RuntimeError('Timed out when waiting for correction loop '
+                               'to apply offsets during offset command')
 
         self.log.debug('sending evt_correctionOffsets')
         self.evt_correctionOffsets.set_put(**self.model.offset,
                                            force_output=True)
 
-        # Should we send the event even if no focus offset is applied?
-        # Assuming not.
-        if getattr(data, 'z') != 0.0:
+        # Only sending the focusOffsetSummary event if a focus affecting
+        # (z-axis) offset is applied (not equal to zero)
+        if abs(getattr(data, 'z')) > 1e-12:
             self.focus_offset_per_category['total'] += getattr(data, 'z')
             self.focus_offset_per_category['userApplied'] += getattr(data, 'z')
             self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
@@ -591,43 +703,90 @@ class ATAOS(ConfigurableCsc):
         """ Reset userApplied provided offsets on a specific axis or all.
         Grating/Filter focus and pointing offsets will remain.
 
+        Offsets can only be reset if the appropriate correction loop is closed.
+
         Parameters
         ----------
-        data
+        data : `object`
+            Contains axis to be reset
 
+        Raises
+        ------
+        RuntimeError
+            If appropriate corrections are not enabled, illegal axis
+            value is specified, or corrections timeout when being
+            applied in the correction loop.
         """
         self.assert_enabled('resetOffset')
 
-        if len(data.axis) == 0 or data.axis == 'all':
-            self.model.reset_offset()
-        elif data.axis in self.model.offset:
-            self.model.set_offset(data.axis, 0.)
-        else:
-            raise RuntimeError(f"Axis {data.axis} invalid. Must be one of "
-                               "m1, m2, x, y, z, u, v, all or and empty string with length zero.")
+        # Grab the asyncio lock so no offsets can be added while
+        # the corrections are being applied
+        # Ideally this would be applied before the if statements below
+        # but that would make the code clunky. Seeing as this is rarely used
+        # and the expressions are fast we'll apply the lock before the check.
 
-        # if correcting for atspectrograph setup then we must add back in the
-        # filter/grating/wavelength offsets
-        # best to do this immediately and not later in a loop as it'll be
-        # confusing to see large offsets pop up when the loop comes on
-        # rather then when the reset command is set
-        if 'atspectrograph' in self.corrections:
-            _offsetToApply = (
-                self.focus_offset_per_category['filter']
-                + self.focus_offset_per_category['disperser']
-                + self.focus_offset_per_category['wavelength']
-            )
+        async with self.correction_loop_lock:
 
-            self.model.set_offset('z', _offsetToApply)
+            if len(data.axis) == 0 or data.axis == 'all':
+                # Verify all loops are closed
+                if not (self.corrections['hexapod']
+                        and self.corrections['m1']
+                        and self.corrections['m2']):
+                    raise RuntimeError('Not all corrections are enabled. '
+                                       'Offsets cannot be reset as a group. '
+                                       'See the enableCorrection to close the correction loop '
+                                       'or reset individual axes.')
+                self.log.debug('Resetting all offsets')
+                self.model.reset_offset()
+            elif data.axis in self.model.offset:
+                # Verify appropriate corrections are enabled
+                if data.axis == 'm1' and not self.corrections['m1']:
+                    raise RuntimeError('m1 correction must be enabled to reset the offset.')
+                elif data.axis == 'm2' and not self.corrections['m2']:
+                    raise RuntimeError('m2 correction must be enabled to reset the offset.')
+                elif not self.corrections['hexapod']:
+                    raise RuntimeError('hexapod correction must be enabled to reset the offset.')
 
-        self.evt_correctionOffsets.set_put(**self.model.offset,
-                                           force_output=True)
+                # Apply the offset
+                self.model.set_offset(data.axis, 0.)
+            else:
+                raise RuntimeError(f"Axis {data.axis} invalid. Must be one of "
+                                   "m1, m2, x, y, z, u, v, all or an empty string with length zero.")
 
-        # Do not reset the filter/grating offsets, but reset the others
-        self.focus_offset_per_category['total'] = self.model.offset['z']
-        self.focus_offset_per_category['userApplied'] = 0.0
+            # if correcting for atspectrograph setup then we must add back in
+            # to the filter/grating/wavelength offsets
+            # best to do this immediately and not later in a loop as it'll be
+            # confusing to see large offsets pop up when the loop comes on
+            # rather then when the reset command is set
+            if 'atspectrograph' in self.corrections:
+                _offsetToApply = (
+                    self.focus_offset_per_category['filter']
+                    + self.focus_offset_per_category['disperser']
+                    + self.focus_offset_per_category['wavelength']
+                )
+
+                self.model.set_offset('z', _offsetToApply)
+
+            # Do not reset the filter/grating offsets, but reset the others
+            self.focus_offset_per_category['total'] = self.model.offset['z']
+            self.focus_offset_per_category['userApplied'] = 0.0
+
+            # Now want to await for offsets to be reset via the loop,
+            # but first clear past event, then release the lock
+            self.correction_loop_completed_evt.clear()
+
+        # Wait for offsets to be applied
+        try:
+            await asyncio.wait_for(self.correction_loop_completed_evt.wait(), self.cmd_timeout)
+        except asyncio.TimeoutError:
+            raise RuntimeError('Timed out when waiting for correction loop '
+                               'to apply offsets during resetOffset command')
+
+        # Publish events
         self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
                                             force_output=True)
+        self.evt_correctionOffsets.set_put(**self.model.offset,
+                                           force_output=True)
 
     async def do_enableCorrection(self, id_data):
         """Enable corrections on specified axes.
@@ -645,6 +804,14 @@ class ATAOS(ConfigurableCsc):
         ----------
         id_data : `CommandIdData`
             Command ID and data.
+
+        Raises
+        ------
+        Exception
+            If m1 or m2 valve fails to open
+        RuntimeError
+            If correction loop fails to complete just before returning
+            from this method.
         """
         self.assert_enabled('enableCorrection')
         self.assert_any_corrections(id_data)
@@ -710,6 +877,18 @@ class ATAOS(ConfigurableCsc):
 
         self.mark_corrections(id_data, True)
         await asyncio.sleep(0.)  # give control back to event loop
+
+        # Perform one correction loop before handing back
+        # Wait for correction to be applied - should be fast unless large
+        # hexap position changes are required.
+        self.correction_loop_completed_evt.clear()
+
+        try:
+            await asyncio.wait_for(self.correction_loop_completed_evt.wait(), self.cmd_timeout)
+        except asyncio.TimeoutError:
+            raise RuntimeError('Timed out when waiting for correction loop '
+                               'to complete during enableCorrection')
+
         self.publish_enable_corrections()
 
     async def do_disableCorrection(self, id_data):
@@ -722,6 +901,7 @@ class ATAOS(ConfigurableCsc):
         ----------
         id_data : `CommandIdData`
             Command ID and data
+
         """
         self.assert_enabled('disableCorrection')
         self.assert_any_corrections(id_data)
@@ -754,20 +934,93 @@ class ATAOS(ConfigurableCsc):
         await asyncio.sleep(0.)  # give control back to event loop
         self.publish_enable_corrections()
 
-    # TODO: This requires implementation - DM-25150
     async def do_setWavelength(self, id_data):
-        """Set wavelength to optimize focus.
+        """Set wavelength to optimize focus when being used with the
+        LATISS spectrograph. This must only be used
+        when the spectrograph is being used (glass optics are in the beam).
+        This function applies the offset to the model, whereas the loop
+        will apply the actual movement of the hexapod position.
 
-        This is not yet implemented
+        This functionality requires verification on-sky. It is possible
+        that a single relationship for all instrument setups will not be
+        sufficient due to variation in glass thickness/dispersions.
+
+        Note that the offset due to wavelength will be zero'd out with
+        every filter change. The focus offset value for each filter is
+        for the specified central wavelength of that filter in the
+        configuration file (ts_config_attcs).
 
         Parameters
         ----------
         id_data : `CommandIdData`
             Command ID and data
-        """
-        raise NotImplementedError("This method is not yet implemented. (DM-25150)")
 
+        Raises
+        ------
+        RuntimeError
+            If hexapod corrections are not enabled, the
+            beam contains a filter and/or disperser, or the
+            corrections fail to get applied before timing out.
+
+        Warning
+        -------
+        This method must not be called by any other method in the class,
+        besides the regular CSC command-reply algorithm. If called
+        internally, it may cause accounting errors in the offsets.
+        """
         self.assert_enabled('setWavelength')
+
+        # Verify the atspectrograph and hexapod corrections are enabled
+        if not (self.corrections['hexapod']
+                and self.corrections['atspectrograph']):
+            raise RuntimeError('hexapod at atspectrograph corrections must '
+                               'be enabled (via enableCorrection) to apply '
+                               'wavelength offsets.')
+
+        # Check that there is a filter or disperser in the beam (meaning a
+        # non-zero focus offset for a filter is in place). If the beam is
+        # empty then this command should not be applied as the telescope
+        # is achromatic.
+
+        if abs(self.focus_offset_per_category['filter']) + abs(
+                self.focus_offset_per_category['disperser']) == 0.0:
+            raise RuntimeError("Focus offsets associated with the filter/disperser "
+                               f" ({self.current_atspectrograph_filter_name}/"
+                               f"{self.current_atspectrograph_disperser_name})"
+                               f" are zero. No wavelength offsets permitted unless"
+                               "an optic is in the beam.")
+
+        # Grab the asyncio lock when applying the correction
+
+        async with self.correction_loop_lock:
+
+            # must subtract whatever chromatic offset might already be in place
+            _chromatic_offset = (self.model.get_correction_chromatic(id_data.wavelength)
+                                 - self.focus_offset_per_category['wavelength'])
+
+            self.model.add_offset("z", _chromatic_offset)
+
+            self.focus_offset_per_category['total'] += _chromatic_offset
+            self.focus_offset_per_category['wavelength'] = _chromatic_offset
+
+        # Perform one correction loop before handing back
+        # Wait for correction to be applied - should be fast unless large
+        # hexap position changes are required.
+        self.correction_loop_completed_evt.clear()
+
+        try:
+            await asyncio.wait_for(self.correction_loop_completed_evt.wait(), self.cmd_timeout)
+        except asyncio.TimeoutError:
+            raise RuntimeError('Timed out when waiting for correction loop '
+                               'to complete when performing setWavelength '
+                               'offset. Corrections may not have been'
+                               ' applied.')
+
+        # Publish event summarizing the offsets
+        self.evt_focusOffsetSummary.set_put(**self.focus_offset_per_category,
+                                            force_output=True)
+        self.evt_correctionOffsets.set_put(**self.model.offset,
+                                           force_output=True)
 
     # TODO: This requires implementation
     async def health_monitor(self):
@@ -782,78 +1035,86 @@ class ATAOS(ConfigurableCsc):
         """Coroutine to send corrections to m1, m2, hexapod and focus at
         the heartbeat frequency."""
 
+        # Grab the asyncio lock so no offsets can be added while
+        # the corrections are being applied
+
         while self.summary_state == State.ENABLED:
+            # Create a sleep task that will help keep the loop frequency
+            # near the target by running concurrently with the loop
+            sleep_task = asyncio.create_task(asyncio.sleep(self.correction_loop_time))
+            async with self.correction_loop_lock:
 
-            try:
-                # The heartbeat wait is folded here so instead of applying
-                # and then waiting, the loop applies and wait at the same
-                # time.
-                corrections_to_apply = []
-                if self.azimuth is not None and self.elevation is not None:
-                    elevation = self.elevation
-                    azimuth = self.azimuth
+                try:
+                    corrections_to_apply = []
+                    if self.azimuth is not None and self.elevation is not None:
+                        elevation = self.elevation
+                        azimuth = self.azimuth
 
-                    if self.target_elevation is not None and self.target_elevation < self.elevation:
-                        # Telescope in going down, need to go ahead and
-                        # decrease pressure accordingly
-                        elevation = (self.target_elevation + self.elevation) / 2.
-                        self.log.debug("Telescope going down, getting ahead on correction."
-                                       f"el: {self.elevation}, target_el: {self.target_elevation}, "
-                                       f"corr_el: {elevation}")
+                        if self.target_elevation is not None and self.target_elevation < self.elevation:
+                            # Telescope in going down, need to go ahead and
+                            # decrease pressure accordingly
+                            elevation = (self.target_elevation + self.elevation) / 2.
+                            self.log.debug("Telescope going down, getting ahead on correction."
+                                           f"el: {self.elevation}, target_el: {self.target_elevation}, "
+                                           f"corr_el: {elevation}")
 
-                    for correction in self.corrections:
-                        # corrections_routines only has m1, m2 and hexapod,
-                        # NOT FOCUS
-                        if self.corrections[correction] and correction in self.corrections_routines:
-                            self.log.debug(f"Adding {correction} correction.")
-                            corrections_to_apply.append(
-                                self.corrections_routines[correction](azimuth,
-                                                                      elevation))
+                        for correction in self.corrections:
+                            # corrections_routines only has m1, m2 and hexapod,
+                            # NOT FOCUS
+                            if self.corrections[correction] and correction in self.corrections_routines:
+                                self.log.debug(f"Adding {correction} correction.")
+                                corrections_to_apply.append(
+                                    self.corrections_routines[correction](azimuth,
+                                                                          elevation))
 
-                    # Check to see if any model offsets need applying due to
-                    # changes in atspectrograph filter/disperser changes,
-                    # then apply if needed
-                    self.log.debug("self.corrections['atspectrograph']"
-                                   f" is {self.corrections['atspectrograph']}")
-                    self.log.debug("self.focus_offset_yet_to_be_applied "
-                                   f"is {self.focus_offset_yet_to_be_applied}")
-                    self.log.debug("self.pointing_offsets_yet_to_be_applied "
-                                   f"is {self.pointing_offsets_yet_to_be_applied}")
+                        # Check to see if any model offsets need applying due
+                        # to changes in atspectrograph filter/disperser
+                        # changes, then apply if needed
+                        self.log.debug("self.corrections['atspectrograph'] "
+                                       f"is {self.corrections['atspectrograph']}")
+                        self.log.debug("self.focus_offset_yet_to_be_applied "
+                                       f"is {self.focus_offset_yet_to_be_applied}")
+                        self.log.debug("self.pointing_offsets_yet_to_be_applied "
+                                       f"is {self.pointing_offsets_yet_to_be_applied}")
 
-                else:
-                    # This should not raise an exception as it would require
-                    # the ATMCS is online for the ATAOS to be online. Having
-                    # the loop running (but just sleeping) is acceptable and
-                    # allows cycling of components.
-                    self.log.debug("No information available about telescope azimuth and/or "
-                                   "elevation, m1, m2, hexapod corrections cannot occur ")
+                    else:
+                        # This should not raise an exception as it would
+                        # require the ATMCS is online for the ATAOS to
+                        # be online. Having the loop running (but just
+                        # sleeping) is acceptable and allows cycling of
+                        # components.
+                        self.log.debug("No information available about telescope azimuth and/or "
+                                       "elevation, m1, m2, hexapod corrections cannot occur ")
 
-                # FIXME:
-                # Run corrections in series because CSCs are not supporting
-                # concurrent operations yet 2019/June/4
-                corrections_to_apply.append(asyncio.sleep(self.correction_loop_time))
+                    # FIXME:
+                    # Run corrections in series because CSCs are not
+                    # supporting concurrent operations yet 2019/June/4
 
-                for corr in corrections_to_apply:
-                    await corr
+                    for corr in corrections_to_apply:
+                        await corr
 
-                # run corrections concurrently (and/or wait for the heartbeat
-                # interval)
-                # if len(corrections_to_apply) > 0:
-                #     await asyncio.gather(*corrections_to_apply)
+                    # run corrections concurrently (and/or wait for the
+                    # heartbeat interval)
+                    # if len(corrections_to_apply) > 0:
+                    #     await asyncio.gather(*corrections_to_apply)
 
-                # await asyncio.sleep(self.correction_loop_time)
+                except asyncio.CancelledError:
+                    self.log.debug("Correction loop cancelled.")
+                    break
+                except Exception:
+                    self.log.exception("Error in correction loop. Going to FAULT state.")
+                    self.fault(code=CORRECTION_LOOP_DIED,
+                               report="Correction loop died.",
+                               traceback=traceback.format_exc())
+                    break
 
-            except asyncio.CancelledError:
-                self.log.debug("Correction loop cancelled.")
-                break
-            except Exception as e:
-                self.log.error("Error in correction loop. Going to FAULT state.")
-                self.log.exception(e)
-                self.evt_errorCode.set_put(errorCode=CORRECTION_LOOP_DIED,
-                                           errorReport="Correction loop died.",
-                                           traceback=traceback.format_exc())
-                self.fault()
-                break
+            # Lock releases when outside the "with" statement
+            # Set an asyncio.Event (not a DDS Event) saying the loop has
+            # finished and lock is released
+            self.correction_loop_completed_evt.set()
+            # await any remaining time (up to the loop time) before
+            # starting the next iteration
+            await sleep_task
 
     def assert_any_corrections(self, data):
         """Check that at least one attribute of
@@ -986,22 +1247,26 @@ class ATAOS(ConfigurableCsc):
         self.log.info('Caught ATSpectrograph filter change, calculating correction offsets')
         # Relative offset are to be applied to the model
         # so therefore we need to subtract offset already in place for the
-        # previous filter
-        _offset_to_apply = data.focusOffset - self.focus_offset_per_category['filter']
+        # previous filter, including the wavelength offset setting
+        _offset_to_apply = (data.focusOffset - self.focus_offset_per_category['filter']
+                            - self.focus_offset_per_category['wavelength'])
         _pointing_offsets_to_apply = np.array(data.pointingOffsets) - self.pointing_offsets_per_category[
             'filter']
 
         self.log.debug("atspectrograph changed filters "
                        f"from {self.current_atspectrograph_filter_name} to {data.name}")
-        self.log.debug("Calculated a hexapod-z model offset of {_offset_to_apply} "
+        self.log.debug(f"Calculated a hexapod-z model offset of {_offset_to_apply} "
                        "based on focus differences between filters")
         self.log.debug(f"Calculated a pointing offset of {_pointing_offsets_to_apply} "
                        "based on focus differences between filter data")
 
         self.current_atspectrograph_filter_name = data.name
+        self.current_atspectrograph_central_wavelength = data.centralWavelength
         # Apply the offsets to the focusOffsetSummary event
         self.focus_offset_per_category['total'] += data.focusOffset
         self.focus_offset_per_category['filter'] = data.focusOffset
+        # Always default focus to filter central wavelength
+        self.focus_offset_per_category['wavelength'] = 0.0
         self.focus_offset_yet_to_be_applied += _offset_to_apply
 
         self.pointing_offsets_per_category['filter'] = np.array(data.pointingOffsets)
@@ -1213,7 +1478,7 @@ class ATAOS(ConfigurableCsc):
                                    f"inside tolerance ({tolerance}) fox axis {axis}. Ignoring.")
                     continue
                 else:
-                    self.log.debug(f"Set value for axis {axis} above threshold. Apply correction.")
+                    self.log.debug(f"Set value for axis {axis} above threshold. Applying correction.")
                     apply_correction = True
                     break
 
@@ -1277,7 +1542,7 @@ class ATAOS(ConfigurableCsc):
             # than that is surely noise.
 
             if abs(self.focus_offset_yet_to_be_applied) > abs(self.correction_tolerance['z'] / 10):
-                self.log.info(
+                self.log.debug(
                     f'Applying focus offset of {self.focus_offset_yet_to_be_applied} '
                     'in correction loop due to filter '
                     'and/or disperser changes.')
@@ -1305,10 +1570,9 @@ class ATAOS(ConfigurableCsc):
                     'in correction loop due to filter '
                     'and/or disperser changes.')
                 _pointing_offsets = copy.deepcopy(self.pointing_offsets_yet_to_be_applied)
-            elif(_offset_value):
+            elif _offset_value:
                 # No offsets above thresholds, so just return
                 self.log.debug('Focus and pointing offsets below tolerances. Passing without correcting')
-                pass
 
             # Corrections required, so flip the bit on the detailed state
             self.detailed_state = self.detailed_state ^ status_bit
@@ -1377,7 +1641,8 @@ class ATAOS(ConfigurableCsc):
         self.correction_loop_time = 1. / config.correction_frequency
         self.log.debug(f'Correction loop time is {self.correction_loop_time}')
 
-        for key in ['m1', 'm2', 'hexapod_x', 'hexapod_y', 'hexapod_z', 'hexapod_u', 'hexapod_v']:
+        for key in ['m1', 'm2', 'hexapod_x', 'hexapod_y', 'hexapod_z',
+                    'hexapod_u', 'hexapod_v', 'chromatic_dependence']:
             if hasattr(config, key):
                 setattr(self.model, key, getattr(config, key))
             else:
@@ -1400,15 +1665,18 @@ class ATAOS(ConfigurableCsc):
 
         """
 
-        self.log.debug(f'Got new atspectrograph summary state State{(data.summaryState)!r},'
-                       ' resetting filter/disperser offsets')
         self.atspectrograph_summary_state = State(data.summaryState)
+        self.log.debug(f'Caught a new atspectrograph summary state {self.atspectrograph_summary_state!r},'
+                       ' resetting filter/disperser offsets')
         # remove offsets from previous spectrograph setup
         self.focus_offset_yet_to_be_applied = -self.focus_offset_per_category['filter']
         self.focus_offset_per_category['filter'] = 0.0
 
         self.focus_offset_yet_to_be_applied -= self.focus_offset_per_category['disperser']
         self.focus_offset_per_category['disperser'] = 0.0
+
+        self.focus_offset_yet_to_be_applied = -self.focus_offset_per_category['wavelength']
+        self.focus_offset_per_category['wavelength'] = 0.0
 
         self.pointing_offsets_yet_to_be_applied -= self.pointing_offsets_per_category['filter']
         self.pointing_offsets_per_category['filter'] = np.array([0.0, 0.0])
@@ -1420,8 +1688,9 @@ class ATAOS(ConfigurableCsc):
         """ Check that the atspectrograph is online and enabled"""
         if self.atspectrograph_summary_state != State.ENABLED:
             raise RuntimeError(f"ATSpectrograph (LATISS) in {self.atspectrograph_summary_state}. "
-                               f"Expected {State.ENABLED!r}. Enable CSC before "
-                               "activating corrections.")
+                               f"Expected {State.ENABLED!r}. Enable "
+                               f"ATSpectrograph CSC before activating"
+                               f" corrections.")
 
     async def check_atpneumatic(self):
         """Check that the main and instrument valves on ATPneumatics are open.
