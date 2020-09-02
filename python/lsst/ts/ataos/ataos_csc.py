@@ -66,8 +66,7 @@ class ATAOS(ConfigurableCsc):
         super().__init__("ATAOS", index=0,
                          schema_path=schema_path,
                          config_dir=config_dir,
-                         initial_state=initial_state,
-                         initial_simulation_mode=0)
+                         initial_state=initial_state)
 
         self.model = Model()
 
