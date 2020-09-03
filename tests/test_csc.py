@@ -127,7 +127,7 @@ class TestCSC(unittest.TestCase):
                             id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=1.)
 
                 # send start; new state is DISABLED
-                cmd_attr = getattr(harness.aos_remote, f"cmd_start")
+                cmd_attr = getattr(harness.aos_remote, "cmd_start")
                 harness.aos_remote.evt_summaryState.flush()
                 id_ack = await cmd_attr.start(timeout=120)  # this one can take longer to execute
                 state = await harness.aos_remote.evt_summaryState.next(flush=False, timeout=5.)
@@ -155,7 +155,7 @@ class TestCSC(unittest.TestCase):
                             id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=1.)
 
                 # send enable; new state is ENABLED
-                cmd_attr = getattr(harness.aos_remote, f"cmd_enable")
+                cmd_attr = getattr(harness.aos_remote, "cmd_enable")
                 harness.aos_remote.evt_summaryState.flush()
                 id_ack = await cmd_attr.start(timeout=120)  # this one can take longer to execute
                 state = await harness.aos_remote.evt_summaryState.next(flush=False, timeout=5.)
@@ -174,7 +174,7 @@ class TestCSC(unittest.TestCase):
 
                 # Todo: Test that other commands works.
                 # send disable; new state is DISABLED
-                cmd_attr = getattr(harness.aos_remote, f"cmd_disable")
+                cmd_attr = getattr(harness.aos_remote, "cmd_disable")
                 # this CMD may take some time to complete
                 id_ack = await cmd_attr.start(cmd_attr.DataType(), timeout=30.)
                 self.assertEqual(id_ack.ack, salobj.SalRetCode.CMD_COMPLETE)
