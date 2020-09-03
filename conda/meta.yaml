@@ -26,6 +26,7 @@ test:
     - asynctest
     - numpy
     - astropy
+    - astroquery
     - jsonschema
     - pyyaml
     - boto3
@@ -36,7 +37,7 @@ test:
     - ts-observatory-control
   source_files:
     - python
-    - bin.src
+    - bin
     - tests
     - schema
     - setup.cfg
@@ -54,6 +55,7 @@ requirements:
     - python
     - setuptools
     - setuptools_scm
+    - astroquery
     - ts-salobj
     - ts-idl
     - ts-observatory-control

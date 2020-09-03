@@ -27,7 +27,7 @@ setuptools.setup(
     package_data={"": ["*.rst", "*.yaml"]},
     data_files=[(os.path.join(data_files_path, "schema"),
                  ["schema/ATAOS.yaml"])],
-    scripts=["bin.src/ataos_csc.py"],
+    scripts=["bin/ataos_csc.py"],
     tests_require=tests_require,
     extras_require={"dev": dev_requires},
     license="GPL",

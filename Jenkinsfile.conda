@@ -6,8 +6,16 @@ pipeline {
         dockerImageName = "lsstts/conda_package_builder:latest"
         container_name = "salobj_${BUILD_ID}_${JENKINS_NODE_COOKIE}"
     }
-
-
+    options {
+        buildDiscarder(
+            logRotator(
+                artifactDaysToKeepStr: '',
+                artifactNumToKeepStr: '',
+                daysToKeepStr: '14',
+                numToKeepStr: '10'
+            ))
+        disableConcurrentBuilds()
+    }
     stages {
         stage("Pull Docker Image") {
             steps {
