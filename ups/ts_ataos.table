@@ -4,7 +4,6 @@
 #   LSST packages such as utils or daf_base.
 # - Any package whose API is used should be listed explicitly
 #   rather than assuming it will be included recursively.
-setupRequired(sconsUtils)
 setupRequired(ts_salobj)
 setupRequired(ts_config_attcs)
 setupRequired(ts_observatory_control)

@@ -37,7 +37,7 @@ test:
     - ts-observatory-control
   source_files:
     - python
-    - bin.src
+    - bin
     - tests
     - schema
     - setup.cfg
