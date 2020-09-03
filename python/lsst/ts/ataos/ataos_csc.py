@@ -66,8 +66,7 @@ class ATAOS(ConfigurableCsc):
         super().__init__("ATAOS", index=0,
                          schema_path=schema_path,
                          config_dir=config_dir,
-                         initial_state=initial_state,
-                         initial_simulation_mode=0)
+                         initial_state=initial_state)
 
         self.model = Model()
 
@@ -1163,7 +1162,7 @@ class ATAOS(ConfigurableCsc):
                 # correction completed... flip bit on detailedState
                 self.detailed_state = self.detailed_state ^ status_bit
 
-    async def set_hexapod(self, azimuth, elevation, axis=f'xyzuvw'):
+    async def set_hexapod(self, azimuth, elevation, axis='xyzuvw'):
         """Utility to calculate desired hexapod position based on models,
          then apply the movements.
 
@@ -1181,13 +1180,13 @@ class ATAOS(ConfigurableCsc):
 
             status_bit = DetailedState.HEXAPOD
 
-            evt_start_attr = getattr(self, f"evt_hexapodCorrectionStarted")
-            evt_end_attr = getattr(self, f"evt_hexapodCorrectionCompleted")
+            evt_start_attr = getattr(self, "evt_hexapodCorrectionStarted")
+            evt_end_attr = getattr(self, "evt_hexapodCorrectionCompleted")
 
-            if axis == f"z":
+            if axis == "z":
                 status_bit = DetailedState.FOCUS
-                evt_start_attr = getattr(self, f"evt_focusCorrectionStarted")
-                evt_end_attr = getattr(self, f"evt_focusCorrectionCompleted")
+                evt_start_attr = getattr(self, "evt_focusCorrectionStarted")
+                evt_end_attr = getattr(self, "evt_focusCorrectionCompleted")
 
             self.detailed_state = self.detailed_state ^ status_bit
 
