@@ -1,7 +1,7 @@
 $schema: http://json-schema.org/draft-07/schema#
 $id: https://github.com/lsst-ts/ts_ATAOS/blob/master/schema/ATAOS.yaml
 # title must end with one or more spaces followed by the schema version, which must begin with "v"
-title: ATAOS v2
+title: ATAOS v3
 description: Schema for ATAOS configuration files
 type: object
 properties:
@@ -47,6 +47,12 @@ properties:
     default: [0.]
   hexapod_v:
     description: List of polynomial coefficients for hexapod v-correction equation.
+    type: array
+    items:
+      type: number
+    default: [0.]
+  chromatic_dependence:
+    description: List of polynomial coefficients for the relationship between focus and wavelength. Slope is in um of focus per nm.
     type: array
     items:
       type: number
