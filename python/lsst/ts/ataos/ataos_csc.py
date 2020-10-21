@@ -310,7 +310,12 @@ class ATAOS(ConfigurableCsc):
 
         """
         self.log.debug("At beginning of begin_start")
-        if self.pneumatics_summary_state is None:
+        # Populate summary states and create callbacks (unless they
+        # have already been created)
+        if (
+            self.pneumatics_summary_state is None
+            and self.pneumatics.evt_summaryState.has_callback is False
+        ):
             try:
                 self.pneumatics_summary_state = (
                     await self.pneumatics.evt_summaryState.aget(
@@ -323,7 +328,10 @@ class ATAOS(ConfigurableCsc):
             # set callback to monitor summary state from now on...
             self.pneumatics.evt_summaryState.callback = self.pneumatics_ss_callback
 
-        if self.pneumatics_main_valve_state is None:
+        if (
+            self.pneumatics_main_valve_state is None
+            and self.pneumatics.evt_mainValveState.has_callback is False
+        ):
             try:
                 self.pneumatics_main_valve_state = (
                     await self.pneumatics.evt_mainValveState.aget(
@@ -336,7 +344,10 @@ class ATAOS(ConfigurableCsc):
             # set callback to monitor main valve state from now on...
             self.pneumatics.evt_mainValveState.callback = self.pneumatics_mvs_callback
 
-        if self.pneumatics_instrument_valve_state is None:
+        if (
+            self.pneumatics_instrument_valve_state is None
+            and self.pneumatics.evt_instrumentState.has_callback is False
+        ):
             try:
                 self.pneumatics_instrument_valve_state = (
                     await self.pneumatics.evt_instrumentState.aget(
@@ -351,7 +362,10 @@ class ATAOS(ConfigurableCsc):
             # set callback to monitor instrument valve state from now on...
             self.pneumatics.evt_instrumentState.callback = self.pneumatics_iv_callback
 
-        if self.pneumatics_m1_state is None:
+        if (
+            self.pneumatics_m1_state is None
+            and self.pneumatics.evt_m1State.has_callback is False
+        ):
             try:
                 self.pneumatics_m1_state = (
                     await self.pneumatics.evt_m1State.aget(timeout=self.fast_timeout)
@@ -362,7 +376,10 @@ class ATAOS(ConfigurableCsc):
             # set callback to monitor m1 valve state from now on...
             self.pneumatics.evt_m1State.callback = self.pneumatics_m1s_callback
 
-        if self.pneumatics_m2_state is None:
+        if (
+            self.pneumatics_m2_state is None
+            and self.pneumatics.evt_m2State.has_callback is False
+        ):
             try:
                 self.pneumatics_m2_state = (
                     await self.pneumatics.evt_m2State.aget(timeout=self.fast_timeout)
@@ -373,9 +390,14 @@ class ATAOS(ConfigurableCsc):
             # set callback to monitor m2 valve state from now on...
             self.pneumatics.evt_m2State.callback = self.pneumatics_m2s_callback
 
-        if self.atspectrograph_summary_state is None:
-            disperser_data = None
-            filter_data = None
+        # Instantiate the filter/disperser variables as they get
+        # called below
+        disperser_data = None
+        filter_data = None
+        if (
+            self.atspectrograph_summary_state is None
+            and self.atspectrograph.evt_summaryState.has_callback is False
+        ):
 
             try:
                 self.atspectrograph_summary_state = (
@@ -421,9 +443,11 @@ class ATAOS(ConfigurableCsc):
                 self.atspectrograph_filter_monitor_callback
             )
 
-        # add focus offsets from spectrograph - this is the first time these
-        # offsets are determined these offsets get applied in correction_loop
-        # method
+        # Add focus offsets from spectrograph
+        # These offsets are being applied for the first time. Because the
+        # ATAOS was not monitoring the spectrograph when in the standby state
+        # the offsets are made relative to nothing being in the beam
+
         if filter_data is not None:
             self.focus_offset_per_category["filter"] = filter_data.focusOffset
             self.focus_offset_yet_to_be_applied += filter_data.focusOffset
