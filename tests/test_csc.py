@@ -24,7 +24,7 @@ TEST_CONFIG_DIR = pathlib.Path(__file__).parents[1].joinpath("tests", "data", "c
 
 class Harness:
     def __init__(self, config_dir=TEST_CONFIG_DIR):
-        salobj.test_utils.set_random_lsst_dds_domain()
+        salobj.set_random_lsst_dds_partition_prefix()
         self.csc = ataos_csc.ATAOS(config_dir=config_dir)
 
         # Adds a remote to control the ATAOS CSC
@@ -112,6 +112,19 @@ class TestCSC(unittest.TestCase):
                     flush=False, timeout=1.0
                 )
                 self.assertIsNotNone(setting_versions)
+
+                # Bring to standby then enabled twice to verify bugfix as
+                # part of DM-27243
+                for i in range(2):
+                    logger.debug(f"On iteration {i}, now enabling")
+                    await salobj.set_summary_state(
+                        harness.aos_remote, salobj.State.ENABLED, timeout=60
+                    )
+                    await asyncio.sleep(1)
+                    logger.debug(f"On iteration {i}, now going to standby")
+                    await salobj.set_summary_state(
+                        harness.aos_remote, salobj.State.STANDBY, timeout=60
+                    )
 
                 for bad_command in commands:
                     if bad_command in ("start", "exitControl"):
@@ -1631,6 +1644,19 @@ class TestCSC(unittest.TestCase):
                 harness.atspectrograph.evt_summaryState.set_put(
                     summaryState=salobj.State.OFFLINE
                 )
+
+                # Bring to standby then enabled twice to verify bugfix
+                # as part of DM-27243
+                for i in range(2):
+                    logger.debug(f"On iteration {i}, now enabling")
+                    await salobj.set_summary_state(
+                        harness.aos_remote, salobj.State.ENABLED, timeout=60
+                    )
+                    await asyncio.sleep(1)
+                    logger.debug(f"On iteration {i}, now going to standby")
+                    await salobj.set_summary_state(
+                        harness.aos_remote, salobj.State.STANDBY, timeout=60
+                    )
 
         asyncio.get_event_loop().run_until_complete(doit())
 
