@@ -45,6 +45,10 @@ hexapod_v:
 hexapod_w:
   - 0.0000
 
+chromatic_dependence:
+  - 2.1e-5
+  - 0.0
+
 correction_tolerance:
   m1: 500.
   m2: 500.
