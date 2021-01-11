@@ -308,13 +308,11 @@ class TestCSC(unittest.TestCase):
 
                 # provide spectrograph setup info
                 filter_name = "test_filt1"
-                filter_position = 1
                 filter_focus_offset = 0.03
                 filter_central_wavelength = 707.0
                 filter_pointing_offsets = np.array([0.1, -0.1])
 
                 disperser_name = "test_disp1"
-                disperser_position = 1
                 disperser_focus_offset = 0.1
                 disperser_pointing_offsets = np.array([0.05, -0.05])
 
@@ -325,14 +323,12 @@ class TestCSC(unittest.TestCase):
 
                 harness.atspectrograph.evt_reportedFilterPosition.set_put(
                     name=filter_name,
-                    position=filter_position,
                     centralWavelength=filter_central_wavelength,
                     focusOffset=filter_focus_offset,
                     pointingOffsets=filter_pointing_offsets,
                 )
                 harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                     name=disperser_name,
-                    position=disperser_position,
                     focusOffset=disperser_focus_offset,
                     pointingOffsets=disperser_pointing_offsets,
                 )
@@ -723,17 +719,15 @@ class TestCSC(unittest.TestCase):
                 # filter/disperser positions will get published
                 if atspectrograph:
                     filter_name, filter_name2 = "test_filt1", "test_filt2"
-                    filter_position, filter_position2 = 1, 2
                     filter_focus_offset, filter_focus_offset2 = 0.03, 0.0
                     filter_central_wavelength, filter_central_wavelength2 = 707.0, 700
-                    filter_pointing_offsets = np.array([0.1, -0.1])
-                    filter_pointing_offsets2 = np.array([0.2, -0.2])
+                    filter_pointing_offsets = np.array([0.1, 0.0])
+                    filter_pointing_offsets2 = np.array([0.0, -0.2])
 
                     disperser_name, disperser_name2 = "test_disp1", "test_disp2"
-                    disperser_position, disperser_position2 = 1, 2
                     disperser_focus_offset, disperser_focus_offset2 = 0.1, 0.0
-                    disperser_pointing_offsets = np.array([0.05, -0.05])
-                    disperser_pointing_offsets2 = np.array([0.13, -0.13])
+                    disperser_pointing_offsets = np.array([0.0, -0.05])
+                    disperser_pointing_offsets2 = np.array([0.3, 0.0])
                 else:
                     # These are needed for testing purposes when the
                     # spectrograph is offline.
@@ -755,14 +749,12 @@ class TestCSC(unittest.TestCase):
 
                     harness.atspectrograph.evt_reportedFilterPosition.set_put(
                         name=filter_name,
-                        position=filter_position,
                         centralWavelength=filter_central_wavelength,
                         focusOffset=filter_focus_offset,
                         pointingOffsets=filter_pointing_offsets,
                     )
                     harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                         name=disperser_name,
-                        position=disperser_position,
                         focusOffset=disperser_focus_offset,
                         pointingOffsets=disperser_pointing_offsets,
                     )
@@ -799,14 +791,12 @@ class TestCSC(unittest.TestCase):
 
                     harness.atspectrograph.evt_reportedFilterPosition.set_put(
                         name=filter_name,
-                        position=1,
                         centralWavelength=filter_central_wavelength,
                         focusOffset=filter_focus_offset,
                         pointingOffsets=filter_pointing_offsets,
                     )
                     harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                         name=disperser_name,
-                        position=1,
                         focusOffset=disperser_focus_offset,
                         pointingOffsets=disperser_pointing_offsets,
                     )
@@ -966,7 +956,6 @@ class TestCSC(unittest.TestCase):
 
                     harness.atspectrograph.evt_reportedFilterPosition.set_put(
                         name=filter_name2,
-                        position=filter_position2,
                         centralWavelength=filter_central_wavelength2,
                         focusOffset=filter_focus_offset2,
                         pointingOffsets=filter_pointing_offsets2,
@@ -1048,7 +1037,6 @@ class TestCSC(unittest.TestCase):
 
                     harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                         name=disperser_name2,
-                        position=disperser_position2,
                         focusOffset=disperser_focus_offset2,
                         pointingOffsets=disperser_pointing_offsets2,
                     )
@@ -1265,14 +1253,12 @@ class TestCSC(unittest.TestCase):
                 # filter/disperser positions will get published
 
                 filter_name, filter_name2 = "test_filt1", "test_filt2"
-                filter_position, filter_position2 = 1, 2
                 filter_focus_offset, filter_focus_offset2 = 0.03, 0.0
                 filter_central_wavelength, filter_central_wavelength2 = 707.0, 700
                 filter_pointing_offsets = np.array([0.1, -0.1])
                 filter_pointing_offsets2 = np.array([0.2, -0.2])
 
                 disperser_name, disperser_name2 = "test_disp1", "test_disp2"
-                disperser_position, disperser_position2 = 1, 2
                 disperser_focus_offset, disperser_focus_offset2 = 0.1, 0.0
                 disperser_pointing_offsets = np.array([0.05, -0.05])
                 disperser_pointing_offsets2 = np.array([0.13, -0.13])
@@ -1285,14 +1271,12 @@ class TestCSC(unittest.TestCase):
 
                 harness.atspectrograph.evt_reportedFilterPosition.set_put(
                     name=filter_name,
-                    position=filter_position,
                     centralWavelength=filter_central_wavelength,
                     focusOffset=filter_focus_offset,
                     pointingOffsets=filter_pointing_offsets,
                 )
                 harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                     name=disperser_name,
-                    position=disperser_position,
                     focusOffset=disperser_focus_offset,
                     pointingOffsets=disperser_pointing_offsets,
                 )
@@ -1473,7 +1457,6 @@ class TestCSC(unittest.TestCase):
 
                 harness.atspectrograph.evt_reportedFilterPosition.set_put(
                     name=filter_name2,
-                    position=filter_position2,
                     centralWavelength=filter_central_wavelength2,
                     focusOffset=filter_focus_offset2,
                     pointingOffsets=filter_pointing_offsets2,
@@ -1538,7 +1521,6 @@ class TestCSC(unittest.TestCase):
 
                 harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                     name=disperser_name2,
-                    position=disperser_position2,
                     focusOffset=disperser_focus_offset2,
                     pointingOffsets=disperser_pointing_offsets2,
                 )
@@ -1750,14 +1732,12 @@ class TestCSC(unittest.TestCase):
 
                 harness.atspectrograph.evt_reportedFilterPosition.set_put(
                     name="filter1",
-                    position=1,
                     centralWavelength=701.5,
                     focusOffset=filterFocusOffset,
                     pointingOffsets=filterPointingOffsets,
                 )
                 harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                     name="disperser2",
-                    position=1,
                     focusOffset=disperserFocusOffset,
                     pointingOffsets=gratingPointingOffsets,
                 )
@@ -2057,7 +2037,6 @@ class TestCSC(unittest.TestCase):
         """
 
         async def doit():
-
             async with Harness() as harness:
 
                 def callback(data):
@@ -2132,14 +2111,12 @@ class TestCSC(unittest.TestCase):
 
                 harness.atspectrograph.evt_reportedFilterPosition.set_put(
                     name="filter1",
-                    position=1,
                     centralWavelength=701.5,
                     focusOffset=filterFocusOffset,
                     pointingOffsets=filterPointingOffsets,
                 )
                 harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                     name="disperser2",
-                    position=1,
                     focusOffset=disperserFocusOffset,
                     pointingOffsets=gratingPointingOffsets,
                 )
@@ -2308,5 +2285,4 @@ async def publish_mountEncoders(harness, azimuth, elevation, ntimes=5):
 
 
 if __name__ == "__main__":
-
     unittest.main()
