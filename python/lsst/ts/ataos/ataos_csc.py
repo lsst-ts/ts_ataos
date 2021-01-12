@@ -1808,7 +1808,7 @@ class ATAOS(ConfigurableCsc):
                 await asyncio.sleep(0)
 
             # Now do pointing
-            if abs(np.max(self.pointing_offsets_yet_to_be_applied)) > abs(
+            if np.max(np.abs(self.pointing_offsets_yet_to_be_applied)) > abs(
                 _pointing_tolerance
             ):
                 self.log.info(
