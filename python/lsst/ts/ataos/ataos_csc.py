@@ -104,6 +104,8 @@ class ATAOS(ConfigurableCsc):
         self.correction_loop_time = base_csc.HEARTBEAT_INTERVAL
 
         self.camera_exposing = False  # flag to monitor if camera is exposing
+        # Variable to track mirror lowering on disabled state transition
+        self.lower_mirrors_on_disable_state_transition = False
 
         # Create Remotes
         self.camera = Remote(self.domain, "ATCamera", include=["shutterDetailedState"])
@@ -507,6 +509,28 @@ class ATAOS(ConfigurableCsc):
             "the corrections enabled"
         )
 
+    async def begin_disable(self, id_data):
+        """Beginning of salobj.do_disable; called before state changes to
+         disabled.
+
+        Used to track which direction the state machine is transitioning
+        from when entering disabled state. This is required to track
+        if the mirror should be lowered in the call to end_disable.
+
+        Because the state transition dictates if the correction loop is
+        run the lowering needs to happen after the state transition.
+
+        Parameters
+        ----------
+        id_data : `CommandIdData`
+            Command ID and data
+
+        """
+
+        self.lower_mirrors_on_disable_state_transition = (
+            True if (self.summary_state == State.ENABLED) else False
+        )
+
     async def end_disable(self, id_data):
         """End do_disable; called after state changes but before command
         acknowledged.
@@ -532,6 +556,11 @@ class ATAOS(ConfigurableCsc):
         disable = self.cmd_disableCorrection.DataType()
         disable.disableAll = True
         self.mark_corrections(disable, False)
+
+        # Note that the mirror should only be lowered when
+        # coming from the ENABLED state.
+        if self.lower_mirrors_on_disable_state_transition:
+            await self.lower_mirrors_to_hardpoints(m1=True, m2=True)
 
         self.detailed_state = 0
         self.log.debug("At end of end_disable")
@@ -1060,32 +1089,17 @@ class ATAOS(ConfigurableCsc):
         # be performed while this function is running
         await asyncio.sleep(0.0)
 
-        try:
-            if id_data.m1 or id_data.disableAll:
-                # Setting m1 pressure to zero and close valve
-                self.pneumatics.cmd_m1SetPressure.set(pressure=0.0)
-                await self.pneumatics.cmd_m1SetPressure.start(timeout=self.cmd_timeout)
-                await self.pneumatics.cmd_m1CloseAirValve.start(
-                    timeout=self.cmd_timeout
-                )
-        except Exception as e:
-            self.log.error("Failed to close m1 air valve.")
-            self.log.exception(e)
-
-        try:
-            if id_data.m2 or id_data.disableAll:
-                # Setting m1 pressure to zero and close valve
-                self.pneumatics.cmd_m2SetPressure.set(pressure=0.0)
-                await self.pneumatics.cmd_m2SetPressure.start(timeout=self.cmd_timeout)
-                await self.pneumatics.cmd_m2CloseAirValve.start(
-                    timeout=self.cmd_timeout
-                )
-        except Exception as e:
-            self.log.error("Failed to close m2 air valve.")
-            self.log.exception(e)
-
         self.mark_corrections(id_data, False)
         await asyncio.sleep(0.0)  # give control back to event loop
+
+        # Lower mirrors if appropriate
+        if id_data == "disableAll":
+            await self.lower_mirrors_to_hardpoints(m1=True, m2=True)
+        elif id_data == "m1":
+            await self.lower_mirrors_to_hardpoints(m1=True, m2=False)
+        elif id_data == "m2":
+            await self.lower_mirrors_to_hardpoints(m1=False, m2=True)
+
         self.publish_enable_corrections()
 
     async def do_setWavelength(self, id_data):
@@ -1303,6 +1317,57 @@ class ATAOS(ConfigurableCsc):
             # await any remaining time (up to the loop time) before
             # starting the next iteration
             await sleep_task
+
+    async def lower_mirrors_to_hardpoints(self, m1=True, m2=True):
+        """Lower mirrors on to hardpoints by setting pneumatic pressures
+        to zero. This is to be called whenever safety of the mirror, or
+        lifting of the mirror from the hardpoints (completely) may be a
+        concern.
+
+        This method is expected to be called when disabling the CSC,
+        transitioning to fault state, and disabling corrections.
+
+        Parameters
+        ----------
+        m1 : `boolean`
+            Lower primary (m1) mirror
+
+        m2 : `boolean`
+            Lower secondary (m2) mirror
+
+        """
+
+        # Why are these try statements? is this leftover from an ATMCS bug?
+        # Leaving this for now
+        try:
+            if m1:
+                # Setting m1 pressure to zero and close valve
+                self.pneumatics.cmd_m1SetPressure.set(pressure=0.0)
+                await self.pneumatics.cmd_m1SetPressure.start(timeout=self.cmd_timeout)
+                await self.pneumatics.cmd_m1CloseAirValve.start(
+                    timeout=self.cmd_timeout
+                )
+                self.log.info("M1 mirror lowered onto hardpoints")
+        except Exception as e:
+            self.log.error(
+                "Failed to set m1 presssure to zero and/or close m1 air valve."
+            )
+            self.log.exception(e)
+
+        try:
+            if m2:
+                # Setting m2 pressure to zero and close valve
+                self.pneumatics.cmd_m2SetPressure.set(pressure=0.0)
+                await self.pneumatics.cmd_m2SetPressure.start(timeout=self.cmd_timeout)
+                await self.pneumatics.cmd_m2CloseAirValve.start(
+                    timeout=self.cmd_timeout
+                )
+                self.log.info("M2 mirror lowered onto hardpoints")
+        except Exception as e:
+            self.log.error(
+                "Failed to set m1 presssure to zero and/or close m2 air valve."
+            )
+            self.log.exception(e)
 
     def assert_any_corrections(self, data):
         """Check that at least one attribute of
@@ -2016,7 +2081,7 @@ class ATAOS(ConfigurableCsc):
                 else:
                     raise e
 
-    def fault(self, code=None, report=""):
+    async def fault(self, code=None, report=""):
         """Enter the fault state.
 
         Subclass parent method to disable corrections in the wait to FAULT
@@ -2035,6 +2100,8 @@ class ATAOS(ConfigurableCsc):
         disable_corr = self.cmd_disableCorrection.DataType()
         disable_corr.disableAll = True
         self.mark_corrections(disable_corr, False)
+
+        await self.lower_mirrors_to_hardpoints(m1=True, m2=True)
 
         self.publish_enable_corrections()
 
