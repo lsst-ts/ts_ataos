@@ -210,10 +210,10 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(id_ack.ack, salobj.SalRetCode.CMD_COMPLETE)
                 self.assertEqual(id_ack.error, 0)
                 self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
-                # Verify mirror is lowered when transitioning from ENABLED TO
-                # DISABLED
-                assert harness.pnematics.cmd_m1SetPressure.callback.called
-                assert harness.pnematics.cmd_m2SetPressure.callback.called
+                # Verify mirror is NOT lowered when transitioning from ENABLED
+                # to DISABLED since corrections are not active
+                assert not harness.pnematics.cmd_m1SetPressure.callback.called
+                assert not harness.pnematics.cmd_m2SetPressure.callback.called
 
                 # Bring to standby then enabled twice to verify bugfix as
                 # part of DM-27243
@@ -670,11 +670,19 @@ class TestCSC(unittest.TestCase):
                     with self.subTest(axis=axis):
                         self.assertEqual(0.0, getattr(offset_reset, axis))
 
-                # Open the loops, mostly so the output is cleaner
-                logger.debug("Disabling corrections")
+                # Open two loops, mostly so the output is cleaner
+                logger.debug("Disabling hexapod and spectrograph corrections")
                 await harness.aos_remote.cmd_disableCorrection.set_start(
-                    disableAll=True, timeout=STD_TIMEOUT
+                    hexapod=True, timeout=STD_TIMEOUT
                 )
+
+                # Send to disabled state
+                await harness.aos_remote.cmd_disable.start()
+
+                # Verify mirror is lowered when transitioning from ENABLED
+                # to DISABLED since corrections are enabled
+                assert harness.pnematics.cmd_m1SetPressure.callback.called
+                assert harness.pnematics.cmd_m2SetPressure.callback.called
 
         # # Run for unspecified location
         asyncio.get_event_loop().run_until_complete(doit())

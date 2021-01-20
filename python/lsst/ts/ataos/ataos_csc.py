@@ -558,9 +558,14 @@ class ATAOS(ConfigurableCsc):
         self.mark_corrections(disable, False)
 
         # Note that the mirror should only be lowered when
-        # coming from the ENABLED state.
-        if self.lower_mirrors_on_disable_state_transition:
-            await self.lower_mirrors_to_hardpoints(m1=True, m2=True)
+        # coming from the ENABLED state AND if corrections
+        # were enabled
+        if self.lower_mirrors_on_disable_state_transition and (
+            self.corrections["m1"] or self.corrections["m2"]
+        ):
+            await self.lower_mirrors_to_hardpoints(
+                m1=self.corrections["m1"], m2=self.corrections["m2"]
+            )
 
         self.detailed_state = 0
         self.log.debug("At end of end_disable")
@@ -1337,8 +1342,8 @@ class ATAOS(ConfigurableCsc):
 
         """
 
-        # Why are these try statements? is this leftover from an ATMCS bug?
-        # Leaving this for now
+        # Try statements required to handle case when ATPneumatics is
+        # disabled.
         try:
             if m1:
                 # Setting m1 pressure to zero and close valve
@@ -2101,7 +2106,10 @@ class ATAOS(ConfigurableCsc):
         disable_corr.disableAll = True
         self.mark_corrections(disable_corr, False)
 
-        await self.lower_mirrors_to_hardpoints(m1=True, m2=True)
+        # Now lower the mirrors if the corrections were enabled
+        await self.lower_mirrors_to_hardpoints(
+            m1=self.corrections["m1"], m2=self.corrections["m2"]
+        )
 
         self.publish_enable_corrections()
 
