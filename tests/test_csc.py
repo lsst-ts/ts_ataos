@@ -153,8 +153,8 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(state.summaryState, salobj.State.DISABLED)
                 # Verify mirror is NOT lowered when transitioning from STANDBY
                 # to DISABLED
-                assert not harness.pnematics.cmd_m1SetPressure.callback.called
-                assert not harness.pnematics.cmd_m2SetPressure.callback.called
+                self.assertFalse(harness.pnematics.cmd_m1SetPressure.callback.called)
+                self.assertFalse(harness.pnematics.cmd_m2SetPressure.callback.called)
 
                 # TODO: There are two events issued when starting;
                 # appliedSettingsMatchStart and settingsApplied.
@@ -212,8 +212,8 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
                 # Verify mirror is NOT lowered when transitioning from ENABLED
                 # to DISABLED since corrections are not active
-                assert not harness.pnematics.cmd_m1SetPressure.callback.called
-                assert not harness.pnematics.cmd_m2SetPressure.callback.called
+                self.assertFalse(harness.pnematics.cmd_m1SetPressure.callback.called)
+                self.assertFalse(harness.pnematics.cmd_m2SetPressure.callback.called)
 
                 # Bring to standby then enabled twice to verify bugfix as
                 # part of DM-27243
@@ -681,8 +681,8 @@ class TestCSC(unittest.TestCase):
 
                 # Verify mirror is lowered when transitioning from ENABLED
                 # to DISABLED since corrections are enabled
-                assert harness.pnematics.cmd_m1SetPressure.callback.called
-                assert harness.pnematics.cmd_m2SetPressure.callback.called
+                self.assertTrue(harness.pnematics.cmd_m1SetPressure.callback.called)
+                self.assertTrue(harness.pnematics.cmd_m2SetPressure.callback.called)
 
         # # Run for unspecified location
         asyncio.get_event_loop().run_until_complete(doit())

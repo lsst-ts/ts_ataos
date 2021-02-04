@@ -104,8 +104,6 @@ class ATAOS(ConfigurableCsc):
         self.correction_loop_time = base_csc.HEARTBEAT_INTERVAL
 
         self.camera_exposing = False  # flag to monitor if camera is exposing
-        # Variable to track mirror lowering on disabled state transition
-        self.lower_mirrors_on_disable_state_transition = False
 
         # Create Remotes
         self.camera = Remote(self.domain, "ATCamera", include=["shutterDetailedState"])
@@ -509,28 +507,6 @@ class ATAOS(ConfigurableCsc):
             "the corrections enabled"
         )
 
-    async def begin_disable(self, id_data):
-        """Beginning of salobj.do_disable; called before state changes to
-         disabled.
-
-        Used to track which direction the state machine is transitioning
-        from when entering disabled state. This is required to track
-        if the mirror should be lowered in the call to end_disable.
-
-        Because the state transition dictates if the correction loop is
-        run the lowering needs to happen after the state transition.
-
-        Parameters
-        ----------
-        id_data : `CommandIdData`
-            Command ID and data
-
-        """
-
-        self.lower_mirrors_on_disable_state_transition = (
-            True if (self.summary_state == State.ENABLED) else False
-        )
-
     async def end_disable(self, id_data):
         """End do_disable; called after state changes but before command
         acknowledged.
@@ -560,9 +536,8 @@ class ATAOS(ConfigurableCsc):
         # Note that the mirror should only be lowered when
         # coming from the ENABLED state AND if corrections
         # were enabled
-        if self.lower_mirrors_on_disable_state_transition and (
-            self.corrections["m1"] or self.corrections["m2"]
-        ):
+
+        if self.corrections["m1"] or self.corrections["m2"]:
             await self.lower_mirrors_to_hardpoints(
                 m1=self.corrections["m1"], m2=self.corrections["m2"]
             )
@@ -1021,8 +996,7 @@ class ATAOS(ConfigurableCsc):
                 )
 
         except Exception as e:
-            self.log.error("Failed to open m1 air valve.")
-            self.log.exception(e)
+            self.log.exception("Failed to open m1 air valve.")
             raise e
 
         try:
@@ -1047,8 +1021,7 @@ class ATAOS(ConfigurableCsc):
                     pressure=0.0, timeout=self.cmd_timeout
                 )
         except Exception as e:
-            self.log.error("Failed to open m2 air valve.")
-            self.log.exception(e)
+            self.log.exception("Failed to open m2 air valve.")
             raise e
 
         # make sure the spectrograph is still online and enabled
@@ -1353,11 +1326,10 @@ class ATAOS(ConfigurableCsc):
                     timeout=self.cmd_timeout
                 )
                 self.log.info("M1 mirror lowered onto hardpoints")
-        except Exception as e:
-            self.log.error(
+        except Exception:
+            self.log.exception(
                 "Failed to set m1 presssure to zero and/or close m1 air valve."
             )
-            self.log.exception(e)
 
         try:
             if m2:
@@ -1368,11 +1340,10 @@ class ATAOS(ConfigurableCsc):
                     timeout=self.cmd_timeout
                 )
                 self.log.info("M2 mirror lowered onto hardpoints")
-        except Exception as e:
-            self.log.error(
+        except Exception:
+            self.log.exception(
                 "Failed to set m1 presssure to zero and/or close m2 air valve."
             )
-            self.log.exception(e)
 
     def assert_any_corrections(self, data):
         """Check that at least one attribute of
