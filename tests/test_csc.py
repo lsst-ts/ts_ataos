@@ -152,7 +152,7 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
                 self.assertEqual(state.summaryState, salobj.State.DISABLED)
                 # Verify mirror is NOT lowered when transitioning from STANDBY
-                # to DISABLED
+                # to DISABLED -
                 self.assertFalse(harness.pnematics.cmd_m1SetPressure.callback.called)
                 self.assertFalse(harness.pnematics.cmd_m2SetPressure.callback.called)
 
@@ -681,6 +681,7 @@ class TestCSC(unittest.TestCase):
 
                 # Verify mirror is lowered when transitioning from ENABLED
                 # to DISABLED since corrections are enabled
+                # FIXME: DM-28681 - verify called with pressure=0
                 self.assertTrue(harness.pnematics.cmd_m1SetPressure.callback.called)
                 self.assertTrue(harness.pnematics.cmd_m2SetPressure.callback.called)
 

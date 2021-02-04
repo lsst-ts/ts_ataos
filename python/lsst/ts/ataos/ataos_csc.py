@@ -12,6 +12,7 @@ from lsst.ts.salobj import (
     State,
     AckError,
     SalRetCode,
+    make_done_future,
 )
 
 from lsst.ts.idl.enums import ATPneumatics
@@ -99,6 +100,9 @@ class ATAOS(ConfigurableCsc):
         # Create an Event object that will get set after each
         # loop iteration
         self.correction_loop_completed_evt = asyncio.Event()
+        # create a task to lower the mirrors that can be run
+        # as a background event when going to fault state
+        self.lower_mirrors_task = make_done_future()
 
         # Time between corrections
         self.correction_loop_time = base_csc.HEARTBEAT_INTERVAL
@@ -1262,7 +1266,7 @@ class ATAOS(ConfigurableCsc):
                             "elevation, m1, m2, hexapod corrections cannot occur "
                         )
 
-                    # FIXME:
+                    # FIXME: DM-28681
                     # Run corrections in series because CSCs are not
                     # supporting concurrent operations yet 2019/June/4
 
@@ -2057,7 +2061,7 @@ class ATAOS(ConfigurableCsc):
                 else:
                     raise e
 
-    async def fault(self, code=None, report=""):
+    def fault(self, code=None, report=""):
         """Enter the fault state.
 
         Subclass parent method to disable corrections in the wait to FAULT
@@ -2078,9 +2082,16 @@ class ATAOS(ConfigurableCsc):
         self.mark_corrections(disable_corr, False)
 
         # Now lower the mirrors if the corrections were enabled
-        await self.lower_mirrors_to_hardpoints(
-            m1=self.corrections["m1"], m2=self.corrections["m2"]
-        )
+        # salobj doesn't support an asynchronous fault method
+        # so need to schedule a background task
+        if self.lower_mirrors_task.done():
+            self.lower_mirrors_task = asyncio.create_task(
+                self.lower_mirrors_to_hardpoints(
+                    m1=self.corrections["m1"], m2=self.corrections["m2"]
+                )
+            )
+        else:
+            self.log.info("Mirrors already being lowered. Skipping...")
 
         self.publish_enable_corrections()
 
