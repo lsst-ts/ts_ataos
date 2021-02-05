@@ -12,6 +12,7 @@ from lsst.ts.salobj import (
     State,
     AckError,
     SalRetCode,
+    make_done_future,
 )
 
 from lsst.ts.idl.enums import ATPneumatics
@@ -99,6 +100,9 @@ class ATAOS(ConfigurableCsc):
         # Create an Event object that will get set after each
         # loop iteration
         self.correction_loop_completed_evt = asyncio.Event()
+        # create a task to lower the mirrors that can be run
+        # as a background event when going to fault state
+        self.lower_mirrors_task = make_done_future()
 
         # Time between corrections
         self.correction_loop_time = base_csc.HEARTBEAT_INTERVAL
@@ -532,6 +536,15 @@ class ATAOS(ConfigurableCsc):
         disable = self.cmd_disableCorrection.DataType()
         disable.disableAll = True
         self.mark_corrections(disable, False)
+
+        # Note that the mirror should only be lowered when
+        # coming from the ENABLED state AND if corrections
+        # were enabled
+
+        if self.corrections["m1"] or self.corrections["m2"]:
+            await self.lower_mirrors_to_hardpoints(
+                m1=self.corrections["m1"], m2=self.corrections["m2"]
+            )
 
         self.detailed_state = 0
         self.log.debug("At end of end_disable")
@@ -987,8 +1000,7 @@ class ATAOS(ConfigurableCsc):
                 )
 
         except Exception as e:
-            self.log.error("Failed to open m1 air valve.")
-            self.log.exception(e)
+            self.log.exception("Failed to open m1 air valve.")
             raise e
 
         try:
@@ -1013,8 +1025,7 @@ class ATAOS(ConfigurableCsc):
                     pressure=0.0, timeout=self.cmd_timeout
                 )
         except Exception as e:
-            self.log.error("Failed to open m2 air valve.")
-            self.log.exception(e)
+            self.log.exception("Failed to open m2 air valve.")
             raise e
 
         # make sure the spectrograph is still online and enabled
@@ -1060,32 +1071,17 @@ class ATAOS(ConfigurableCsc):
         # be performed while this function is running
         await asyncio.sleep(0.0)
 
-        try:
-            if id_data.m1 or id_data.disableAll:
-                # Setting m1 pressure to zero and close valve
-                self.pneumatics.cmd_m1SetPressure.set(pressure=0.0)
-                await self.pneumatics.cmd_m1SetPressure.start(timeout=self.cmd_timeout)
-                await self.pneumatics.cmd_m1CloseAirValve.start(
-                    timeout=self.cmd_timeout
-                )
-        except Exception as e:
-            self.log.error("Failed to close m1 air valve.")
-            self.log.exception(e)
-
-        try:
-            if id_data.m2 or id_data.disableAll:
-                # Setting m1 pressure to zero and close valve
-                self.pneumatics.cmd_m2SetPressure.set(pressure=0.0)
-                await self.pneumatics.cmd_m2SetPressure.start(timeout=self.cmd_timeout)
-                await self.pneumatics.cmd_m2CloseAirValve.start(
-                    timeout=self.cmd_timeout
-                )
-        except Exception as e:
-            self.log.error("Failed to close m2 air valve.")
-            self.log.exception(e)
-
         self.mark_corrections(id_data, False)
         await asyncio.sleep(0.0)  # give control back to event loop
+
+        # Lower mirrors if appropriate
+        if id_data == "disableAll":
+            await self.lower_mirrors_to_hardpoints(m1=True, m2=True)
+        elif id_data == "m1":
+            await self.lower_mirrors_to_hardpoints(m1=True, m2=False)
+        elif id_data == "m2":
+            await self.lower_mirrors_to_hardpoints(m1=False, m2=True)
+
         self.publish_enable_corrections()
 
     async def do_setWavelength(self, id_data):
@@ -1270,7 +1266,7 @@ class ATAOS(ConfigurableCsc):
                             "elevation, m1, m2, hexapod corrections cannot occur "
                         )
 
-                    # FIXME:
+                    # FIXME: DM-28681
                     # Run corrections in series because CSCs are not
                     # supporting concurrent operations yet 2019/June/4
 
@@ -1303,6 +1299,55 @@ class ATAOS(ConfigurableCsc):
             # await any remaining time (up to the loop time) before
             # starting the next iteration
             await sleep_task
+
+    async def lower_mirrors_to_hardpoints(self, m1=True, m2=True):
+        """Lower mirrors on to hardpoints by setting pneumatic pressures
+        to zero. This is to be called whenever safety of the mirror, or
+        lifting of the mirror from the hardpoints (completely) may be a
+        concern.
+
+        This method is expected to be called when disabling the CSC,
+        transitioning to fault state, and disabling corrections.
+
+        Parameters
+        ----------
+        m1 : `boolean`
+            Lower primary (m1) mirror
+
+        m2 : `boolean`
+            Lower secondary (m2) mirror
+
+        """
+
+        # Try statements required to handle case when ATPneumatics is
+        # disabled.
+        try:
+            if m1:
+                # Setting m1 pressure to zero and close valve
+                self.pneumatics.cmd_m1SetPressure.set(pressure=0.0)
+                await self.pneumatics.cmd_m1SetPressure.start(timeout=self.cmd_timeout)
+                await self.pneumatics.cmd_m1CloseAirValve.start(
+                    timeout=self.cmd_timeout
+                )
+                self.log.info("M1 mirror lowered onto hardpoints")
+        except Exception:
+            self.log.exception(
+                "Failed to set m1 presssure to zero and/or close m1 air valve."
+            )
+
+        try:
+            if m2:
+                # Setting m2 pressure to zero and close valve
+                self.pneumatics.cmd_m2SetPressure.set(pressure=0.0)
+                await self.pneumatics.cmd_m2SetPressure.start(timeout=self.cmd_timeout)
+                await self.pneumatics.cmd_m2CloseAirValve.start(
+                    timeout=self.cmd_timeout
+                )
+                self.log.info("M2 mirror lowered onto hardpoints")
+        except Exception:
+            self.log.exception(
+                "Failed to set m1 presssure to zero and/or close m2 air valve."
+            )
 
     def assert_any_corrections(self, data):
         """Check that at least one attribute of
@@ -2035,6 +2080,18 @@ class ATAOS(ConfigurableCsc):
         disable_corr = self.cmd_disableCorrection.DataType()
         disable_corr.disableAll = True
         self.mark_corrections(disable_corr, False)
+
+        # Now lower the mirrors if the corrections were enabled
+        # salobj doesn't support an asynchronous fault method
+        # so need to schedule a background task
+        if self.lower_mirrors_task.done():
+            self.lower_mirrors_task = asyncio.create_task(
+                self.lower_mirrors_to_hardpoints(
+                    m1=self.corrections["m1"], m2=self.corrections["m2"]
+                )
+            )
+        else:
+            self.log.info("Mirrors already being lowered. Skipping...")
 
         self.publish_enable_corrections()
 

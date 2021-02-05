@@ -13,7 +13,7 @@ from lsst.ts.idl.enums import ATPneumatics
 
 index_gen = salobj.index_generator()
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig()
 logger = logging.getLogger(__name__)
 logger.propagate = True
 
@@ -98,6 +98,13 @@ class TestCSC(unittest.TestCase):
 
             async with Harness() as harness:
 
+                # Define callbacks
+                def callback(data):
+                    pass
+
+                harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
+                harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
+
                 # Check initial state
                 current_state = await harness.aos_remote.evt_summaryState.next(
                     flush=False, timeout=1.0
@@ -112,19 +119,6 @@ class TestCSC(unittest.TestCase):
                     flush=False, timeout=1.0
                 )
                 self.assertIsNotNone(setting_versions)
-
-                # Bring to standby then enabled twice to verify bugfix as
-                # part of DM-27243
-                for i in range(2):
-                    logger.debug(f"On iteration {i}, now enabling")
-                    await salobj.set_summary_state(
-                        harness.aos_remote, salobj.State.ENABLED, timeout=60
-                    )
-                    await asyncio.sleep(1)
-                    logger.debug(f"On iteration {i}, now going to standby")
-                    await salobj.set_summary_state(
-                        harness.aos_remote, salobj.State.STANDBY, timeout=60
-                    )
 
                 for bad_command in commands:
                     if bad_command in ("start", "exitControl"):
@@ -157,6 +151,10 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(id_ack.error, 0)
                 self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
                 self.assertEqual(state.summaryState, salobj.State.DISABLED)
+                # Verify mirror is NOT lowered when transitioning from STANDBY
+                # to DISABLED -
+                self.assertFalse(harness.pnematics.cmd_m1SetPressure.callback.called)
+                self.assertFalse(harness.pnematics.cmd_m2SetPressure.callback.called)
 
                 # TODO: There are two events issued when starting;
                 # appliedSettingsMatchStart and settingsApplied.
@@ -212,6 +210,23 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(id_ack.ack, salobj.SalRetCode.CMD_COMPLETE)
                 self.assertEqual(id_ack.error, 0)
                 self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
+                # Verify mirror is NOT lowered when transitioning from ENABLED
+                # to DISABLED since corrections are not active
+                self.assertFalse(harness.pnematics.cmd_m1SetPressure.callback.called)
+                self.assertFalse(harness.pnematics.cmd_m2SetPressure.callback.called)
+
+                # Bring to standby then enabled twice to verify bugfix as
+                # part of DM-27243
+                for i in range(2):
+                    logger.debug(f"On iteration {i}, now enabling")
+                    await salobj.set_summary_state(
+                        harness.aos_remote, salobj.State.ENABLED, timeout=60
+                    )
+                    await asyncio.sleep(1)
+                    logger.debug(f"On iteration {i}, now going to standby")
+                    await salobj.set_summary_state(
+                        harness.aos_remote, salobj.State.STANDBY, timeout=60
+                    )
 
         asyncio.get_event_loop().run_until_complete(doit())
 
@@ -655,11 +670,20 @@ class TestCSC(unittest.TestCase):
                     with self.subTest(axis=axis):
                         self.assertEqual(0.0, getattr(offset_reset, axis))
 
-                # Open the loops, mostly so the output is cleaner
-                logger.debug("Disabling corrections")
+                # Open two loops, mostly so the output is cleaner
+                logger.debug("Disabling hexapod and spectrograph corrections")
                 await harness.aos_remote.cmd_disableCorrection.set_start(
-                    disableAll=True, timeout=STD_TIMEOUT
+                    hexapod=True, timeout=STD_TIMEOUT
                 )
+
+                # Send to disabled state
+                await harness.aos_remote.cmd_disable.start()
+
+                # Verify mirror is lowered when transitioning from ENABLED
+                # to DISABLED since corrections are enabled
+                # FIXME: DM-28681 - verify called with pressure=0
+                self.assertTrue(harness.pnematics.cmd_m1SetPressure.callback.called)
+                self.assertTrue(harness.pnematics.cmd_m2SetPressure.callback.called)
 
         # # Run for unspecified location
         asyncio.get_event_loop().run_until_complete(doit())
