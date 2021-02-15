@@ -310,7 +310,7 @@ class TestCSC(unittest.TestCase):
                 )
 
                 harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
-                harness.atptg.cmd_offsetAzEl.callback = Mock(
+                harness.atptg.cmd_poriginOffset.callback = Mock(
                     wraps=mount_offset_callback
                 )
 
@@ -408,10 +408,10 @@ class TestCSC(unittest.TestCase):
                 harness.pnematics.cmd_m2SetPressure.callback.assert_called()
                 if while_exposing:
                     harness.hexapod.cmd_moveToPosition.callback.assert_not_called()
-                    harness.atptg.cmd_offsetAzEl.callback.assert_not_called()
+                    harness.atptg.cmd_poriginOffset.callback.assert_not_called()
                 else:
                     harness.hexapod.cmd_moveToPosition.callback.assert_called()
-                    harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                    harness.atptg.cmd_poriginOffset.callback.assert_called()
 
                 harness.aos_remote.evt_detailedState.callback.assert_called()
 
@@ -738,7 +738,7 @@ class TestCSC(unittest.TestCase):
                     wraps=hexapod_move_callback
                 )
                 harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
-                harness.atptg.cmd_offsetAzEl.callback = Mock(
+                harness.atptg.cmd_poriginOffset.callback = Mock(
                     wraps=mount_offset_callback
                 )
 
@@ -1012,7 +1012,7 @@ class TestCSC(unittest.TestCase):
                         timeout=STD_TIMEOUT
                     )
                     # check pointing offset was applied
-                    harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                    harness.atptg.cmd_poriginOffset.callback.assert_called()
 
                     # check focus model updates were applied
                     offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
@@ -1092,7 +1092,7 @@ class TestCSC(unittest.TestCase):
                         timeout=STD_TIMEOUT
                     )
                     # check pointing offset was applied
-                    harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                    harness.atptg.cmd_poriginOffset.callback.assert_called()
 
                     offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
                         flush=False, timeout=STD_TIMEOUT
@@ -1288,7 +1288,7 @@ class TestCSC(unittest.TestCase):
                     wraps=hexapod_move_callback
                 )
                 harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
-                harness.atptg.cmd_offsetAzEl.callback = Mock(
+                harness.atptg.cmd_poriginOffset.callback = Mock(
                     wraps=mount_offset_callback
                 )
 
@@ -1514,10 +1514,10 @@ class TestCSC(unittest.TestCase):
                     timeout=STD_TIMEOUT
                 )
                 # check pointing offset was applied
-                harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                harness.atptg.cmd_poriginOffset.callback.assert_called()
                 # Should have only been called once
                 offset_call_count_filt2 = (
-                    harness.atptg.cmd_offsetAzEl.callback.call_count
+                    harness.atptg.cmd_poriginOffset.callback.call_count
                 )
                 logger.debug(f"offset_call_count_filt2 is {offset_call_count_filt2}")
 
@@ -1586,7 +1586,7 @@ class TestCSC(unittest.TestCase):
                 )
                 # check pointing offset was applied
                 offset_call_count_disp2 = (
-                    harness.atptg.cmd_offsetAzEl.callback.call_count
+                    harness.atptg.cmd_poriginOffset.callback.call_count
                 )
                 logger.debug(
                     f"offset_call_count_disp2 is now {offset_call_count_disp2}"
@@ -1662,7 +1662,7 @@ class TestCSC(unittest.TestCase):
                 # check pointing offset was *NOT* applied since no
                 # changes were made
                 offset_call_count_filt2b = (
-                    harness.atptg.cmd_offsetAzEl.callback.call_count
+                    harness.atptg.cmd_poriginOffset.callback.call_count
                 )
                 self.assertEqual(offset_call_count_filt2b, offset_call_count_disp2)
 
@@ -1809,7 +1809,7 @@ class TestCSC(unittest.TestCase):
                 harness.hexapod.cmd_moveToPosition.callback = Mock(
                     wraps=hexapod_move_callback
                 )
-                harness.atptg.cmd_offsetAzEl.callback = Mock(
+                harness.atptg.cmd_poriginOffset.callback = Mock(
                     wraps=mount_offset_callback
                 )
 
@@ -1956,7 +1956,7 @@ class TestCSC(unittest.TestCase):
                                 timeout=STD_TIMEOUT
                             )
                             # check pointing offset was applied
-                            harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                            harness.atptg.cmd_poriginOffset.callback.assert_called()
                             # check offsets were applied correctly
                             focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
                                 flush=False, timeout=STD_TIMEOUT
