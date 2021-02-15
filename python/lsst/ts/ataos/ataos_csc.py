@@ -138,6 +138,13 @@ class ATAOS(ConfigurableCsc):
         self.focus_offset_yet_to_be_applied = 0.0
         self.pointing_offsets_yet_to_be_applied = np.zeros((2))  # in arcsec
 
+        # Counter for how many loops through spectrogrpah correction are
+        # required. This is needed to satisfy race conditions that are not
+        # accounted for if using a boolean. This originates from the ATAOS
+        # always needing to publish events for filter/grating/wavelength
+        # changes, even when no actual change is required.
+        self.atspectrograph_corrections_required = 0
+
         # Add required callbacks for ATCamera
         self.camera.evt_shutterDetailedState.callback = self.shutter_monitor_callback
 
@@ -452,7 +459,7 @@ class ATAOS(ConfigurableCsc):
         # ATAOS was not monitoring the spectrograph when in the standby state
         # the offsets are made relative to nothing being in the beam
 
-        if filter_data is not None:
+        if filter_data is not None and disperser_data is not None:
             self.focus_offset_per_category["filter"] = filter_data.focusOffset
             self.focus_offset_yet_to_be_applied += filter_data.focusOffset
             self.pointing_offsets_per_category["filter"] = np.array(
@@ -466,7 +473,9 @@ class ATAOS(ConfigurableCsc):
                 filter_data.centralWavelength
             )
 
-        if disperser_data is not None:
+            # Add a spectrograph correction loop so so the offsets are applied
+            self.atspectrograph_corrections_required += 1
+
             self.focus_offset_per_category["disperser"] = disperser_data.focusOffset
             self.focus_offset_yet_to_be_applied += disperser_data.focusOffset
             self.pointing_offsets_per_category["disperser"] = np.array(
@@ -1149,6 +1158,9 @@ class ATAOS(ConfigurableCsc):
         # Grab the asyncio lock when applying the correction
 
         async with self.correction_loop_lock:
+            self.log.debug(
+                "Compensating for focus difference due to change in wavelength."
+            )
 
             # must subtract whatever chromatic offset might already be in place
             _chromatic_offset = (
@@ -1160,6 +1172,9 @@ class ATAOS(ConfigurableCsc):
 
             self.focus_offset_per_category["total"] += _chromatic_offset
             self.focus_offset_per_category["wavelength"] = _chromatic_offset
+
+            # add a correction cycle to make the wavelength change
+            self.atspectrograph_corrections_required += 1
 
         # Perform one correction loop before handing back
         # Wait for correction to be applied - should be fast unless large
@@ -1485,6 +1500,8 @@ class ATAOS(ConfigurableCsc):
         self.log.info(
             "Caught ATSpectrograph filter change, calculating correction offsets"
         )
+        # Add a correction cycle to accomodate the change
+        self.atspectrograph_corrections_required += 1
         # Relative offset are to be applied to the model
         # so therefore we need to subtract offset already in place for the
         # previous filter, including the wavelength offset setting
@@ -1536,6 +1553,8 @@ class ATAOS(ConfigurableCsc):
         self.log.info(
             "Caught ATSpectrograph disperser change, calculating correction offsets"
         )
+        # Add a correction loop cycle
+        self.atspectrograph_corrections_required += 1
         _offset_to_apply = (
             data.focusOffset - self.focus_offset_per_category["disperser"]
         )
@@ -1758,12 +1777,13 @@ class ATAOS(ConfigurableCsc):
                 ):
                     self.log.debug(
                         f"Set value ({set_value}) and current value ({current}) "
-                        f"inside tolerance ({tolerance}) fox axis {axis}. Ignoring."
+                        f"inside tolerance ({tolerance}) for axis {axis}. Ignoring."
                     )
                     continue
                 else:
                     self.log.debug(
-                        f"Set value for axis {axis} above threshold. Applying correction."
+                        f"Set value for axis {axis} exceeds minimal threshold "
+                        f"required to apply correction. Applying correction."
                     )
                     apply_correction = True
                     break
@@ -1795,7 +1815,8 @@ class ATAOS(ConfigurableCsc):
 
     async def set_atspectrograph_corrections(self, azimuth, elevation):
         """Utility to apply hexapod and/or pointing corrections based on
-         the ATSpectrograph configuration.
+         the ATSpectrograph configuration. This gets called as part of
+         the regular control loop.
 
         Parameters
         ----------
@@ -1805,11 +1826,32 @@ class ATAOS(ConfigurableCsc):
 
         Can only be applied if hexapod correction is also applied
         """
-        self.log.debug("At the beginning of set_atspectrograph_corrections")
+        self.log.debug(
+            f"At the beginning of set_atspectrograph_corrections with "
+            f"{self.atspectrograph_corrections_required} correction "
+            f"loops required. "
+        )
 
-        if self.can_move():
-            # publish new detailed state
-            self.log.debug("Applying Spectrograph Corrections, if required")
+        if (
+            self.atspectrograph_corrections_required == 0
+            and self.focus_offset_yet_to_be_applied <= 1e-12
+        ):
+            self.log.warning(
+                "No atspectrograph corrections loaded but focus_offsets are non-zero"
+            )
+        if (
+            self.atspectrograph_corrections_required == 0
+            and np.max(np.abs(self.pointing_offsets_yet_to_be_applied)) <= 1e-12
+        ):
+            self.log.warning(
+                "No atspectrograph corrections loaded but focus_offsets are non-zero"
+            )
+
+        if self.can_move() and (self.atspectrograph_corrections_required != 0):
+
+            self.log.debug(
+                "Applying Spectrograph Corrections due to filter/grating/wavelength change"
+            )
 
             status_bit = DetailedState.ATSPECTROGRAPH
             _offset_value = 0.0
@@ -1825,40 +1867,44 @@ class ATAOS(ConfigurableCsc):
             # applied to the hexapod anyways, so any offset 10x smaller
             # than that is surely noise.
 
+            self.log.debug(
+                f"Applying focus offset of {self.focus_offset_yet_to_be_applied} "
+                "in correction loop due to filter "
+                "and/or disperser changes."
+            )
+            # add the offset, then reset the value
+            # using subtraction here to avoid a possible race condition
+            # note that self.focus_offset_yet_to_be_applied is a value
+            # not an object so no deepcopy is required
             if abs(self.focus_offset_yet_to_be_applied) > abs(
                 self.correction_tolerance["z"] / 10
             ):
-                self.log.debug(
-                    f"Applying focus offset of {self.focus_offset_yet_to_be_applied} "
-                    "in correction loop due to filter "
-                    "and/or disperser changes."
-                )
-                # add the offset, then reset the value
-                # using subtraction here to avoid a possible race condition
-                # note that self.focus_offset_yet_to_be_applied is a value
-                # not an object so no deepcopy is required
                 _offset_value = self.focus_offset_yet_to_be_applied
                 self.model.add_offset("z", _offset_value)
                 self.focus_offset_yet_to_be_applied -= _offset_value
-                # publish events with new offsets
-                self.evt_correctionOffsets.set_put(
-                    **self.model.offset, force_output=True
-                )
                 # Do accounting to republish total offset and others that were
                 # set in the callbacks
                 self.focus_offset_per_category["total"] = self.model.offset["z"]
-                self.evt_focusOffsetSummary.set_put(
-                    **self.focus_offset_per_category, force_output=True
+            else:
+                self.log.debug(
+                    "Focus offset less than tolerance for "
+                    "adjustment. Passing without correcting"
                 )
-                await asyncio.sleep(0)
+
+            # publish events with new offsets, even if unchanged
+            self.evt_correctionOffsets.set_put(**self.model.offset, force_output=True)
+            self.evt_focusOffsetSummary.set_put(
+                **self.focus_offset_per_category, force_output=True
+            )
+            await asyncio.sleep(0)
 
             # Now do pointing
             if np.max(np.abs(self.pointing_offsets_yet_to_be_applied)) > abs(
                 _pointing_tolerance
             ):
                 self.log.info(
-                    f"Applying pointing offset of [X,Y]={self.pointing_offsets_yet_to_be_applied} "
-                    "in correction loop due to filter "
+                    f"Required pointing offset of [X,Y]={self.pointing_offsets_yet_to_be_applied} "
+                    "arcsec in correction loop due to filter "
                     "and/or disperser changes."
                 )
                 _pointing_offsets = copy.deepcopy(
@@ -1867,8 +1913,13 @@ class ATAOS(ConfigurableCsc):
             elif _offset_value:
                 # No offsets above thresholds, so just return
                 self.log.debug(
-                    "Focus and pointing offsets below tolerances. Passing without correcting"
+                    "Focus and pointing offsets less than tolerance required "
+                    "for adjustment. Passing without correcting"
                 )
+
+            # Now apply any required corrections and publish events
+            # This is required even if no focus or pointing changes are above
+            # the thresholds
 
             # Corrections required, so flip the bit on the detailed state
             self.detailed_state = self.detailed_state ^ status_bit
@@ -1881,52 +1932,53 @@ class ATAOS(ConfigurableCsc):
                 focusOffset=_offset_value, pointingOffsets=_pointing_offsets
             )
 
-            try:
-                # Don't need a tolerance since these values only get set if
-                # they meet a tolerance already
-                if abs(_offset_value):
-                    self.log.debug("Applying focus correction with hexapod")
-                    await self.set_hexapod(azimuth, elevation)
-
-                if np.max(abs(_pointing_offsets)):
-                    self.log.debug(
-                        "Applying pointing correction _pointing_offsets"
-                        f" = {_pointing_offsets} with atcs"
-                    )
-                    # apply offsets relative to what is already there
-                    await self.atcs.offset_xy(
-                        _pointing_offsets[0],
-                        _pointing_offsets[1],
-                        relative=True,
-                        persistent=True,
-                    )
-                    await asyncio.sleep(0)
-                    # update accounting and remove the already applied offsets
-                    self.pointing_offsets_per_category["total"] += _pointing_offsets
-                    self.pointing_offsets_yet_to_be_applied -= _pointing_offsets
-
-                    self.log.debug(
-                        "new value of pointing_offsets_per_category['total'] is"
-                        f" {self.pointing_offsets_per_category['total']}"
-                    )
-                    self.evt_pointingOffsetSummary.set_put(
-                        total=self.pointing_offsets_per_category["total"],
-                        filter=self.pointing_offsets_per_category["filter"],
-                        disperser=self.pointing_offsets_per_category["disperser"],
-                    )
-
-            except Exception as e:
-                self.log.exception(
-                    f"Failed to apply spectrograph pointing offsets of {_pointing_offsets} or "
-                    f"failed to apply focus (hexapod offset) of : {_offset_value}"
+            # Apply focus correction if above tolerance
+            if abs(_offset_value):
+                self.log.debug(
+                    f"Applying focus correction {_offset_value}" " with hexapod"
                 )
-                raise e
-            finally:
+                await self.set_hexapod(azimuth, elevation)
+
+            # Apply pointing correction if above tolerance
+            if np.max(abs(_pointing_offsets)):
+                self.log.debug(
+                    "Applying pointing correction _pointing_offsets"
+                    f" = {_pointing_offsets} with atcs"
+                )
+                # apply offsets relative to what is already there
+                await self.atcs.offset_xy(
+                    _pointing_offsets[0],
+                    _pointing_offsets[1],
+                    relative=True,
+                    persistent=True,
+                )
+                await asyncio.sleep(0)
+                # update accounting and remove the already applied offsets
+                self.pointing_offsets_per_category["total"] += _pointing_offsets
+                self.pointing_offsets_yet_to_be_applied -= _pointing_offsets
+
+                self.log.debug(
+                    "new value of pointing_offsets_per_category['total'] is"
+                    f" {self.pointing_offsets_per_category['total']}"
+                )
+            # Publish pointing summary
+            self.evt_pointingOffsetSummary.set_put(
+                total=self.pointing_offsets_per_category["total"],
+                filter=self.pointing_offsets_per_category["filter"],
+                disperser=self.pointing_offsets_per_category["disperser"],
+            )
+
+            # Should only publish correction completed if no further
+            # corrections are required
+            self.atspectrograph_corrections_required -= 1
+            if self.atspectrograph_corrections_required == 0:
+                # Publish Event saying corrections are completed
                 self.evt_atspectrographCorrectionCompleted.set_put(
                     focusOffset=_offset_value, pointingOffsets=_pointing_offsets
                 )
-                # correction completed... flip bit on detailedState
-                self.detailed_state = self.detailed_state ^ status_bit
+            # correction completed for this iteration,
+            # flip bit on detailedState
+            self.detailed_state = self.detailed_state ^ status_bit
 
     @staticmethod
     def get_config_pkg():
@@ -1987,6 +2039,8 @@ class ATAOS(ConfigurableCsc):
             f"Caught a new atspectrograph summary state {self.atspectrograph_summary_state!r},"
             " resetting filter/disperser offsets"
         )
+        # Add correction cycles so new corrections will be applied
+        self.atspectrograph_corrections_required = 2  # one for focus, one for pointing
         # remove offsets from previous spectrograph setup
         self.focus_offset_yet_to_be_applied = -self.focus_offset_per_category["filter"]
         self.focus_offset_per_category["filter"] = 0.0
