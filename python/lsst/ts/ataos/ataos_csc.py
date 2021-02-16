@@ -138,7 +138,7 @@ class ATAOS(ConfigurableCsc):
         self.focus_offset_yet_to_be_applied = 0.0
         self.pointing_offsets_yet_to_be_applied = np.zeros((2))  # in arcsec
 
-        # Counter for how many loops through spectrogrpah correction are
+        # Counter for how many loops through spectrograph correction are
         # required. This is needed to satisfy race conditions that are not
         # accounted for if using a boolean. This originates from the ATAOS
         # always needing to publish events for filter/grating/wavelength
@@ -473,7 +473,7 @@ class ATAOS(ConfigurableCsc):
                 filter_data.centralWavelength
             )
 
-            # Add a spectrograph correction loop so so the offsets are applied
+            # Add a spectrograph correction loop so the offsets are applied
             self.atspectrograph_corrections_required += 1
 
             self.focus_offset_per_category["disperser"] = disperser_data.focusOffset
@@ -1832,19 +1832,23 @@ class ATAOS(ConfigurableCsc):
             f"loops required. "
         )
 
+        # The following warnings should never occur but are here to help
+        # troubleshoot the issue should it arise.
         if (
             self.atspectrograph_corrections_required == 0
-            and self.focus_offset_yet_to_be_applied <= 1e-12
+            and abs(self.focus_offset_yet_to_be_applied) <= 1e-12
         ):
             self.log.warning(
-                "No atspectrograph corrections loaded but focus_offsets are non-zero"
+                "No atspectrograph corrections loaded but focus_offsets (above"
+                " the numerical precision floor) are remaining"
             )
         if (
             self.atspectrograph_corrections_required == 0
             and np.max(np.abs(self.pointing_offsets_yet_to_be_applied)) <= 1e-12
         ):
             self.log.warning(
-                "No atspectrograph corrections loaded but focus_offsets are non-zero"
+                "No atspectrograph corrections loaded but pointing_offsets (above"
+                " the numerical precision floor) are non-zero"
             )
 
         if self.can_move() and (self.atspectrograph_corrections_required != 0):
@@ -1940,7 +1944,10 @@ class ATAOS(ConfigurableCsc):
                 await self.set_hexapod(azimuth, elevation)
 
             # Apply pointing correction if above tolerance
-            if np.max(abs(_pointing_offsets)):
+            # note that the comparison to zero should not be an issue as
+            # it's explicitly set to zero then only changed if
+            # the tolerance evaluation done above is satisfied.
+            if np.max(abs(_pointing_offsets)) > 0:
                 self.log.debug(
                     "Applying pointing correction _pointing_offsets"
                     f" = {_pointing_offsets} with atcs"
