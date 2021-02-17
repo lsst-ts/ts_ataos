@@ -1836,23 +1836,30 @@ class ATAOS(ConfigurableCsc):
         # troubleshoot the issue should it arise.
         if (
             self.atspectrograph_corrections_required == 0
-            and abs(self.focus_offset_yet_to_be_applied) <= 1e-12
+            and abs(self.focus_offset_yet_to_be_applied) >= 1e-12
         ):
             self.log.warning(
-                "No atspectrograph corrections loaded but focus_offsets (above"
-                " the numerical precision floor) are remaining"
+                f"No atspectrograph corrections loaded but focus_offsets "
+                f"of {self.self.pointing_offsets_yet_to_be_applied} are "
+                f"non-zero and above the numerical noise floor"
             )
         if (
             self.atspectrograph_corrections_required == 0
-            and np.max(np.abs(self.pointing_offsets_yet_to_be_applied)) <= 1e-12
+            and np.max(np.abs(self.pointing_offsets_yet_to_be_applied)) >= 1e-12
         ):
             self.log.warning(
-                "No atspectrograph corrections loaded but pointing_offsets (above"
-                " the numerical precision floor) are non-zero"
+                "No atspectrograph corrections loaded but pointing_offsets of"
+                f" {self.pointing_offsets_yet_to_be_applied} are non-zero and"
+                f" above the numerical noise floor"
             )
 
-        if self.can_move() and (self.atspectrograph_corrections_required != 0):
-
+        # if self.can_move() and
+        # (self.atspectrograph_corrections_required != 0):
+        if (
+            self.can_move()
+            and np.max(np.abs(self.pointing_offsets_yet_to_be_applied)) >= 1e-12
+            and abs(self.focus_offset_yet_to_be_applied) >= 1e-12
+        ):
             self.log.debug(
                 "Applying Spectrograph Corrections due to filter/grating/wavelength change"
             )
