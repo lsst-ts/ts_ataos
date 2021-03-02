@@ -16,6 +16,7 @@ from lsst.ts.salobj import (
 )
 
 from lsst.ts.idl.enums import ATPneumatics
+from . import __version__
 
 from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
 
@@ -64,6 +65,9 @@ class ATAOS(ConfigurableCsc):
     Configurable Commandable SAL Component (CSC) for the Auxiliary Telescope
     Active Optics System.
     """
+
+    valid_simulation_modes = (0,)
+    version = __version__
 
     def __init__(self, config_dir=None, initial_state=State.STANDBY):
         """
@@ -538,8 +542,12 @@ class ATAOS(ConfigurableCsc):
 
         try:
             await self.correction_loop_task
+        except asyncio.CancelledError:
+            self.log.debug("Correction loop task cancelled.")
         except Exception as e:
-            self.log.info("Exception while waiting for correction loop task to finish.")
+            self.log.exception(
+                "Exception while waiting for correction loop task to finish."
+            )
             self.log.exception(e)
 
         disable = self.cmd_disableCorrection.DataType()
@@ -1094,7 +1102,6 @@ class ATAOS(ConfigurableCsc):
         self.publish_enable_corrections()
 
     async def do_setWavelength(self, id_data):
-
         """Set wavelength to optimize focus when being used with the
         LATISS spectrograph. This must only be used
         when the spectrograph is being used (glass optics are in the beam).
