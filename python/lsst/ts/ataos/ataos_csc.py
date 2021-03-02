@@ -2008,15 +2008,6 @@ class ATAOS(ConfigurableCsc):
                 f"Focus residuals are: {self.focus_offset_yet_to_be_applied}"
             )
 
-            # # Always will be true - FIXME
-            # found a case where if the hexapod correction is too small and
-            # doesn't get applied then this may not always be true.
-            # if (
-            #     np.max(np.abs(self.pointing_offsets_yet_to_be_applied))
-            #     <= 1e-12
-            #     or abs(self.focus_offset_yet_to_be_applied) <= 1e-12
-            # ):
-
             # Publish Event saying corrections are completed
             self.evt_atspectrographCorrectionCompleted.set_put(
                 focusOffset=_offset_value,

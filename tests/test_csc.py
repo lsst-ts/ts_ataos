@@ -700,15 +700,6 @@ class TestCSC(unittest.TestCase):
                     0.0,
                 )
 
-                # Send to disabled state
-                await harness.aos_remote.cmd_disable.start()
-
-                # Verify mirror is lowered when transitioning from ENABLED
-                # to DISABLED since corrections are enabled
-                # FIXME: DM-28681 - verify called with pressure=0
-                self.assertTrue(harness.pnematics.cmd_m1SetPressure.callback.called)
-                self.assertTrue(harness.pnematics.cmd_m2SetPressure.callback.called)
-
         # # Run for unspecified location
         asyncio.get_event_loop().run_until_complete(doit())
 
