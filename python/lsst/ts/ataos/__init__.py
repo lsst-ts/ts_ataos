@@ -19,10 +19,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from .ataos_csc import *
-from .model import Model
-
 try:
     from .version import *
 except ImportError:
     __version__ = "?"
+
+from .ataos_csc import *
+from .model import Model
