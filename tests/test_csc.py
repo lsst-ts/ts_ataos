@@ -13,7 +13,7 @@ from lsst.ts.idl.enums import ATPneumatics
 
 index_gen = salobj.index_generator()
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig()
 logger = logging.getLogger(__name__)
 logger.propagate = True
 
@@ -98,6 +98,13 @@ class TestCSC(unittest.TestCase):
 
             async with Harness() as harness:
 
+                # Define callbacks
+                def callback(data):
+                    pass
+
+                harness.pnematics.cmd_m1SetPressure.callback = Mock(wraps=callback)
+                harness.pnematics.cmd_m2SetPressure.callback = Mock(wraps=callback)
+
                 # Check initial state
                 current_state = await harness.aos_remote.evt_summaryState.next(
                     flush=False, timeout=1.0
@@ -112,19 +119,6 @@ class TestCSC(unittest.TestCase):
                     flush=False, timeout=1.0
                 )
                 self.assertIsNotNone(setting_versions)
-
-                # Bring to standby then enabled twice to verify bugfix as
-                # part of DM-27243
-                for i in range(2):
-                    logger.debug(f"On iteration {i}, now enabling")
-                    await salobj.set_summary_state(
-                        harness.aos_remote, salobj.State.ENABLED, timeout=60
-                    )
-                    await asyncio.sleep(1)
-                    logger.debug(f"On iteration {i}, now going to standby")
-                    await salobj.set_summary_state(
-                        harness.aos_remote, salobj.State.STANDBY, timeout=60
-                    )
 
                 for bad_command in commands:
                     if bad_command in ("start", "exitControl"):
@@ -157,6 +151,10 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(id_ack.error, 0)
                 self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
                 self.assertEqual(state.summaryState, salobj.State.DISABLED)
+                # Verify mirror is NOT lowered when transitioning from STANDBY
+                # to DISABLED -
+                self.assertFalse(harness.pnematics.cmd_m1SetPressure.callback.called)
+                self.assertFalse(harness.pnematics.cmd_m2SetPressure.callback.called)
 
                 # TODO: There are two events issued when starting;
                 # appliedSettingsMatchStart and settingsApplied.
@@ -212,6 +210,23 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(id_ack.ack, salobj.SalRetCode.CMD_COMPLETE)
                 self.assertEqual(id_ack.error, 0)
                 self.assertEqual(harness.csc.summary_state, salobj.State.DISABLED)
+                # Verify mirror is NOT lowered when transitioning from ENABLED
+                # to DISABLED since corrections are not active
+                self.assertFalse(harness.pnematics.cmd_m1SetPressure.callback.called)
+                self.assertFalse(harness.pnematics.cmd_m2SetPressure.callback.called)
+
+                # Bring to standby then enabled twice to verify bugfix as
+                # part of DM-27243
+                for i in range(2):
+                    logger.debug(f"On iteration {i}, now enabling")
+                    await salobj.set_summary_state(
+                        harness.aos_remote, salobj.State.ENABLED, timeout=60
+                    )
+                    await asyncio.sleep(1)
+                    logger.debug(f"On iteration {i}, now going to standby")
+                    await salobj.set_summary_state(
+                        harness.aos_remote, salobj.State.STANDBY, timeout=60
+                    )
 
         asyncio.get_event_loop().run_until_complete(doit())
 
@@ -295,7 +310,7 @@ class TestCSC(unittest.TestCase):
                 )
 
                 harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
-                harness.atptg.cmd_offsetAzEl.callback = Mock(
+                harness.atptg.cmd_poriginOffset.callback = Mock(
                     wraps=mount_offset_callback
                 )
 
@@ -355,7 +370,10 @@ class TestCSC(unittest.TestCase):
                     timeout=STD_TIMEOUT
                 )
 
-                logger.debug("Send applyCorrection command")
+                logger.debug(
+                    "Send applyCorrection command which will now "
+                    "work because corrections are disabled"
+                )
                 azimuth = np.random.uniform(0.0, 360.0)
                 # make sure it is never zero because np.random.uniform
                 # is [min, max)
@@ -366,6 +384,7 @@ class TestCSC(unittest.TestCase):
                 logger.debug(
                     "Test that the hexapod won't move if there's an exposure happening"
                 )
+                logger.debug(f"while_exposing is set to {while_exposing}")
                 if while_exposing:
                     shutter_state_topic = (
                         harness.camera.evt_shutterDetailedState.DataType()
@@ -389,10 +408,10 @@ class TestCSC(unittest.TestCase):
                 harness.pnematics.cmd_m2SetPressure.callback.assert_called()
                 if while_exposing:
                     harness.hexapod.cmd_moveToPosition.callback.assert_not_called()
-                    harness.atptg.cmd_offsetAzEl.callback.assert_not_called()
+                    harness.atptg.cmd_poriginOffset.callback.assert_not_called()
                 else:
                     harness.hexapod.cmd_moveToPosition.callback.assert_called()
-                    harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                    harness.atptg.cmd_poriginOffset.callback.assert_called()
 
                 harness.aos_remote.evt_detailedState.callback.assert_called()
 
@@ -655,10 +674,30 @@ class TestCSC(unittest.TestCase):
                     with self.subTest(axis=axis):
                         self.assertEqual(0.0, getattr(offset_reset, axis))
 
-                # Open the loops, mostly so the output is cleaner
-                logger.debug("Disabling corrections")
+                # Open two loops, mostly so the output is cleaner
+                logger.debug("Disabling hexapod and spectrograph corrections")
                 await harness.aos_remote.cmd_disableCorrection.set_start(
-                    disableAll=True, timeout=STD_TIMEOUT
+                    hexapod=True, timeout=STD_TIMEOUT
+                )
+
+                # Send to disabled state
+                await harness.aos_remote.cmd_disable.start()
+
+                # Verify mirror is lowered when transitioning from ENABLED
+                # to DISABLED since corrections are enabled
+                # this is done by sending a pressure of zero
+
+                self.assertEqual(
+                    (harness.pnematics.cmd_m1SetPressure.callback.call_args[0])[
+                        0
+                    ].pressure,
+                    0.0,
+                )
+                self.assertEqual(
+                    (harness.pnematics.cmd_m2SetPressure.callback.call_args[0])[
+                        0
+                    ].pressure,
+                    0.0,
                 )
 
         # # Run for unspecified location
@@ -710,7 +749,7 @@ class TestCSC(unittest.TestCase):
                     wraps=hexapod_move_callback
                 )
                 harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
-                harness.atptg.cmd_offsetAzEl.callback = Mock(
+                harness.atptg.cmd_poriginOffset.callback = Mock(
                     wraps=mount_offset_callback
                 )
 
@@ -788,6 +827,8 @@ class TestCSC(unittest.TestCase):
                     # flush these to be sure the grab the proper one below
                     harness.aos_remote.evt_correctionOffsets.flush()
                     harness.aos_remote.evt_focusOffsetSummary.flush()
+                    harness.aos_remote.evt_atspectrographCorrectionStarted.flush()
+                    harness.aos_remote.evt_atspectrographCorrectionCompleted.flush()
 
                     harness.atspectrograph.evt_reportedFilterPosition.set_put(
                         name=filter_name,
@@ -801,6 +842,19 @@ class TestCSC(unittest.TestCase):
                         pointingOffsets=disperser_pointing_offsets,
                     )
 
+                logger.debug(
+                    "Make sure spectrograph corrections have not "
+                    "been applied, so this should fail"
+                )
+                with self.assertRaises(asyncio.TimeoutError):
+                    await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                        timeout=STD_TIMEOUT, flush=False
+                    )
+                with self.assertRaises(asyncio.TimeoutError):
+                    await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                        timeout=STD_TIMEOUT, flush=False
+                    )
+
                 # Turn on spectrograph corrections
                 if atspectrograph:
                     logger.debug("Enabling atspectrograph and hexapod corrections")
@@ -809,7 +863,14 @@ class TestCSC(unittest.TestCase):
                     )
 
                     pointingOffsetSummary = await harness.aos_remote.evt_pointingOffsetSummary.next(
-                        flush=False, timeout=STD_TIMEOUT
+                        flush=False, timeout=STD_TIMEOUT * 2
+                    )
+                    # check atspectrograph corrections were applied
+                    await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                        timeout=STD_TIMEOUT, flush=False
+                    )
+                    await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                        timeout=STD_TIMEOUT, flush=False
                     )
 
                 # check corrections were applied
@@ -889,6 +950,8 @@ class TestCSC(unittest.TestCase):
                         atspectrograph=True, hexapod=True
                     )
 
+                # Wait for corrections to be applied
+                await asyncio.sleep(4)
                 logger.debug(
                     "Try to apply an offset without the correction on, this should fail."
                 )
@@ -896,6 +959,16 @@ class TestCSC(unittest.TestCase):
                     await harness.aos_remote.cmd_offset.set_start(
                         **offset2, timeout=STD_TIMEOUT
                     )
+
+                offset_applied = await harness.aos_remote.evt_correctionOffsets.aget()
+                focusOffsetSummary = (
+                    await harness.aos_remote.evt_focusOffsetSummary.aget()
+                )
+
+                logger.debug(
+                    f"Before offset, focusOffsetSummary is {focusOffsetSummary}"
+                )
+                logger.debug(f"Before offset, offset_applied is {offset_applied}")
 
                 # flush events then send relative offsets
                 harness.aos_remote.evt_correctionOffsets.flush()
@@ -939,6 +1012,10 @@ class TestCSC(unittest.TestCase):
                     focusOffsetSummary.total, getattr(offset_applied, "z")
                 )
                 # userApplied offset should just be whatever we supplied
+                logger.debug(
+                    f"Checking assertions. focusOffsetSummary is {focusOffsetSummary}"
+                )
+                logger.debug(f"Checking assertions. offset_applied is {offset_applied}")
                 self.assertAlmostEqual(focusOffsetSummary.userApplied, offset["z"])
                 self.assertAlmostEqual(focusOffsetSummary.filter, filter_focus_offset)
                 self.assertAlmostEqual(
@@ -953,6 +1030,8 @@ class TestCSC(unittest.TestCase):
                     harness.aos_remote.evt_correctionOffsets.flush()
                     harness.aos_remote.evt_focusOffsetSummary.flush()
                     harness.aos_remote.evt_pointingOffsetSummary.flush()
+                    harness.aos_remote.evt_atspectrographCorrectionStarted.flush()
+                    harness.aos_remote.evt_atspectrographCorrectionCompleted.flush()
 
                     harness.atspectrograph.evt_reportedFilterPosition.set_put(
                         name=filter_name2,
@@ -961,14 +1040,14 @@ class TestCSC(unittest.TestCase):
                         pointingOffsets=filter_pointing_offsets2,
                     )
 
-                    await harness.aos_remote.evt_atspectrographCorrectionStarted.aget(
-                        timeout=STD_TIMEOUT
+                    await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                        timeout=STD_TIMEOUT, flush=False
                     )
-                    await harness.aos_remote.evt_atspectrographCorrectionCompleted.aget(
-                        timeout=STD_TIMEOUT
+                    await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                        timeout=STD_TIMEOUT, flush=False
                     )
                     # check pointing offset was applied
-                    harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                    harness.atptg.cmd_poriginOffset.callback.assert_called()
 
                     # check focus model updates were applied
                     offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
@@ -1034,6 +1113,8 @@ class TestCSC(unittest.TestCase):
                     harness.aos_remote.evt_correctionOffsets.flush()
                     harness.aos_remote.evt_focusOffsetSummary.flush()
                     harness.aos_remote.evt_pointingOffsetSummary.flush()
+                    harness.aos_remote.evt_atspectrographCorrectionStarted.flush()
+                    harness.aos_remote.evt_atspectrographCorrectionCompleted.flush()
 
                     harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                         name=disperser_name2,
@@ -1041,14 +1122,14 @@ class TestCSC(unittest.TestCase):
                         pointingOffsets=disperser_pointing_offsets2,
                     )
 
-                    await harness.aos_remote.evt_atspectrographCorrectionStarted.aget(
-                        timeout=STD_TIMEOUT
+                    await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                        timeout=STD_TIMEOUT, flush=False
                     )
-                    await harness.aos_remote.evt_atspectrographCorrectionCompleted.aget(
-                        timeout=STD_TIMEOUT
+                    await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                        timeout=STD_TIMEOUT, flush=False
                     )
                     # check pointing offset was applied
-                    harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                    harness.atptg.cmd_poriginOffset.callback.assert_called()
 
                     offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
                         flush=False, timeout=STD_TIMEOUT
@@ -1159,6 +1240,19 @@ class TestCSC(unittest.TestCase):
                 )
 
                 if atspectrograph:
+                    # Verify that no spectrograph specific offset took place
+                    logger.debug(
+                        "Make sure spectrograph correction is not "
+                        "applied, so this should fail"
+                    )
+                    with self.assertRaises(asyncio.TimeoutError):
+                        await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                            timeout=STD_TIMEOUT, flush=False
+                        )
+                    with self.assertRaises(asyncio.TimeoutError):
+                        await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                            timeout=STD_TIMEOUT, flush=False
+                        )
                     # Check pointingOffsets is correct, but note they are
                     # arrays. Must loop over values individually
                     for n in range(len(pointingOffsetSummary.total) - 1):
@@ -1244,7 +1338,7 @@ class TestCSC(unittest.TestCase):
                     wraps=hexapod_move_callback
                 )
                 harness.aos_remote.evt_detailedState.callback = Mock(wraps=callback)
-                harness.atptg.cmd_offsetAzEl.callback = Mock(
+                harness.atptg.cmd_poriginOffset.callback = Mock(
                     wraps=mount_offset_callback
                 )
 
@@ -1293,6 +1387,20 @@ class TestCSC(unittest.TestCase):
                     settingsToApply="current",
                     timeout=60,
                 )
+
+                logger.debug(
+                    "Make sure spectrograph correction is not "
+                    "applied, so this should fail"
+                )
+                with self.assertRaises(asyncio.TimeoutError):
+                    await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                        timeout=STD_TIMEOUT, flush=False
+                    )
+                with self.assertRaises(asyncio.TimeoutError):
+                    await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                        timeout=STD_TIMEOUT, flush=False
+                    )
+
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
                 # send elevation/azimuth positions
@@ -1329,6 +1437,9 @@ class TestCSC(unittest.TestCase):
                 logger.debug("Send new central wavelength with loop closed.")
                 harness.aos_remote.evt_correctionOffsets.flush()
                 harness.aos_remote.evt_focusOffsetSummary.flush()
+                harness.aos_remote.evt_atspectrographCorrectionStarted.flush()
+                harness.aos_remote.evt_atspectrographCorrectionCompleted.flush()
+
                 await harness.aos_remote.cmd_setWavelength.set_start(
                     wavelength=new_cen_wave
                 )
@@ -1347,6 +1458,13 @@ class TestCSC(unittest.TestCase):
                 # check corrections were applied
                 correctionOffsets = await harness.aos_remote.evt_correctionOffsets.aget(
                     timeout=STD_TIMEOUT
+                )
+                # check correction started/completed events were sent
+                await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                    timeout=STD_TIMEOUT, flush=False
+                )
+                await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                    timeout=STD_TIMEOUT, flush=False
                 )
                 # check focus accounting is being done correctly
                 focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.aget(
@@ -1454,6 +1572,8 @@ class TestCSC(unittest.TestCase):
                 harness.aos_remote.evt_correctionOffsets.flush()
                 harness.aos_remote.evt_focusOffsetSummary.flush()
                 harness.aos_remote.evt_pointingOffsetSummary.flush()
+                harness.aos_remote.evt_atspectrographCorrectionStarted.flush()
+                harness.aos_remote.evt_atspectrographCorrectionCompleted.flush()
 
                 harness.atspectrograph.evt_reportedFilterPosition.set_put(
                     name=filter_name2,
@@ -1463,14 +1583,20 @@ class TestCSC(unittest.TestCase):
                 )
 
                 # Timeouts extended as filter/disperser changes can take ~5s
-                await harness.aos_remote.evt_atspectrographCorrectionStarted.aget(
-                    timeout=STD_TIMEOUT * 2
+                await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                    timeout=STD_TIMEOUT * 2, flush=False
                 )
-                await harness.aos_remote.evt_atspectrographCorrectionCompleted.aget(
-                    timeout=STD_TIMEOUT
+                await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                    timeout=STD_TIMEOUT, flush=False
                 )
                 # check pointing offset was applied
-                harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                harness.atptg.cmd_poriginOffset.callback.assert_called()
+                # Should have only been called once
+                offset_call_count_filt2 = (
+                    harness.atptg.cmd_poriginOffset.callback.call_count
+                )
+                # FIXME
+                logger.debug(f"offset_call_count_filt2 is {offset_call_count_filt2}")
 
                 # check focus model updates were applied
                 offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
@@ -1513,11 +1639,15 @@ class TestCSC(unittest.TestCase):
                 # wavelength offset should now be zero!
                 self.assertAlmostEqual(focusOffsetSummary.wavelength, focus_wave_expect)
 
+                await asyncio.sleep(3)
+
                 # flush events then change dispersers
                 logger.debug("Putting in disperser2")
                 harness.aos_remote.evt_correctionOffsets.flush()
                 harness.aos_remote.evt_focusOffsetSummary.flush()
                 harness.aos_remote.evt_pointingOffsetSummary.flush()
+                harness.aos_remote.evt_atspectrographCorrectionStarted.flush()
+                harness.aos_remote.evt_atspectrographCorrectionCompleted.flush()
 
                 harness.atspectrograph.evt_reportedDisperserPosition.set_put(
                     name=disperser_name2,
@@ -1525,14 +1655,20 @@ class TestCSC(unittest.TestCase):
                     pointingOffsets=disperser_pointing_offsets2,
                 )
                 # extended timeouts as filter/disperser changes takes ~5s
-                await harness.aos_remote.evt_atspectrographCorrectionStarted.aget(
-                    timeout=STD_TIMEOUT * 2
+                await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                    timeout=STD_TIMEOUT * 2, flush=False
                 )
-                await harness.aos_remote.evt_atspectrographCorrectionCompleted.aget(
-                    timeout=STD_TIMEOUT
+                await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                    timeout=STD_TIMEOUT, flush=False
                 )
                 # check pointing offset was applied
-                harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                offset_call_count_disp2 = (
+                    harness.atptg.cmd_poriginOffset.callback.call_count
+                )
+                logger.debug(
+                    f"offset_call_count_disp2 is now {offset_call_count_disp2}"
+                )
+                self.assertGreater(offset_call_count_disp2, offset_call_count_filt2)
 
                 offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
                     flush=False, timeout=STD_TIMEOUT * 2
@@ -1572,6 +1708,54 @@ class TestCSC(unittest.TestCase):
                 )
                 # should be zero!
                 self.assertAlmostEqual(focusOffsetSummary.wavelength, focus_wave_expect)
+
+                # Now put in a filter that results in zero changes required
+                # to the telescope setup, but make sure events are all
+                # re-published.
+                logger.debug("Putting in filter2b, which is filter2 again")
+                # flush events then change filters
+                # wavelength offset should now go to zero
+                harness.aos_remote.evt_correctionOffsets.flush()
+                harness.aos_remote.evt_focusOffsetSummary.flush()
+                harness.aos_remote.evt_pointingOffsetSummary.flush()
+                harness.aos_remote.evt_atspectrographCorrectionStarted.flush()
+                harness.aos_remote.evt_atspectrographCorrectionCompleted.flush()
+
+                harness.atspectrograph.evt_reportedFilterPosition.set_put(
+                    name=filter_name2,
+                    centralWavelength=filter_central_wavelength2,
+                    focusOffset=filter_focus_offset2,
+                    pointingOffsets=filter_pointing_offsets2,
+                    force_output=True,  # Must force since it's the same event
+                )
+
+                # Timeouts extended as filter/disperser changes can take ~5s
+                await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                    timeout=STD_TIMEOUT * 2, flush=False
+                )
+                await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                    timeout=STD_TIMEOUT, flush=False
+                )
+                # check pointing offset was *NOT* applied since no
+                # changes were made
+                offset_call_count_filt2b = (
+                    harness.atptg.cmd_poriginOffset.callback.call_count
+                )
+                self.assertEqual(offset_call_count_filt2b, offset_call_count_disp2)
+
+                # check focus model updates were applied
+                offset_applied2 = await harness.aos_remote.evt_correctionOffsets.next(
+                    flush=False, timeout=STD_TIMEOUT
+                )
+                focusOffsetSummary2 = await harness.aos_remote.evt_focusOffsetSummary.next(
+                    flush=False, timeout=STD_TIMEOUT
+                )
+
+                # check that summaries are unchanged
+                self.assertAlmostEqual(
+                    focusOffsetSummary.total, focusOffsetSummary2.total
+                )
+                self.assertAlmostEqual(offset_applied.z, offset_applied2.z)
 
                 # Now reset the offsets (after flushing events), can only
                 # reset offsets for hexapod loop as it's the only one enabled
@@ -1702,7 +1886,7 @@ class TestCSC(unittest.TestCase):
                 harness.hexapod.cmd_moveToPosition.callback = Mock(
                     wraps=hexapod_move_callback
                 )
-                harness.atptg.cmd_offsetAzEl.callback = Mock(
+                harness.atptg.cmd_poriginOffset.callback = Mock(
                     wraps=mount_offset_callback
                 )
 
@@ -1834,22 +2018,22 @@ class TestCSC(unittest.TestCase):
                                 timeout=STD_TIMEOUT
                             )
                         elif corr == "hexapod":
-                            await harness.aos_remote.evt_hexapodCorrectionStarted.aget(
-                                timeout=STD_TIMEOUT
+                            await harness.aos_remote.evt_hexapodCorrectionStarted.next(
+                                timeout=STD_TIMEOUT, flush=False
                             )
                             harness.hexapod.cmd_moveToPosition.callback.assert_called()
-                            await harness.aos_remote.evt_hexapodCorrectionCompleted.aget(
-                                timeout=STD_TIMEOUT
+                            await harness.aos_remote.evt_hexapodCorrectionCompleted.next(
+                                timeout=STD_TIMEOUT, flush=False
                             )
                         elif corr == "atspectrograph":
-                            await harness.aos_remote.evt_atspectrographCorrectionStarted.aget(
-                                timeout=STD_TIMEOUT
+                            await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                                timeout=STD_TIMEOUT, flush=False
                             )
-                            await harness.aos_remote.evt_atspectrographCorrectionCompleted.aget(
-                                timeout=STD_TIMEOUT
+                            await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                                timeout=STD_TIMEOUT, flush=False
                             )
                             # check pointing offset was applied
-                            harness.atptg.cmd_offsetAzEl.callback.assert_called()
+                            harness.atptg.cmd_poriginOffset.callback.assert_called()
                             # check offsets were applied correctly
                             focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
                                 flush=False, timeout=STD_TIMEOUT
@@ -2033,7 +2217,6 @@ class TestCSC(unittest.TestCase):
 
     def test_target_handling(self):
         """Test changing of targets to verify pressures are adjusted correctly
-
         """
 
         async def doit():
