@@ -5,7 +5,7 @@ __all__ = ["Model"]
 
 
 class Model:
-    """ A model class to that handles the ATAOS application level code. This
+    """A model class to that handles the ATAOS application level code. This
     class implements the corrections for each of the axis on the AT telescope,
     e.g. M1 and M2 pressure and hexapod correction.
 
@@ -54,8 +54,7 @@ class Model:
         self.poly_chromatic = np.poly1d(self.config["chromatic_dependence"])
 
     def reset_offset(self):
-        """ Reset all offsets to zero.
-        """
+        """Reset all offsets to zero."""
         self.offset = {
             "m1": 0.0,
             "m2": 0.0,
@@ -67,7 +66,7 @@ class Model:
         }
 
     def set_offset(self, axis, value):
-        """ Set offset for specified axis.
+        """Set offset for specified axis.
 
         Parameters
         ----------
@@ -85,7 +84,7 @@ class Model:
             )
 
     def add_offset(self, axis, value):
-        """ Set offset for specified axis.
+        """Set offset for specified axis.
 
         Parameters
         ----------

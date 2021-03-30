@@ -234,7 +234,7 @@ class TestCSC(unittest.TestCase):
         """Test applyCorrection command. This commands applies the corrections
         for the current telescope position. It only works when the correction
         loop is not enabled.
-         """
+        """
 
         async def doit(get_tel_pos=True, while_exposing=False):
 
@@ -453,11 +453,15 @@ class TestCSC(unittest.TestCase):
                             flush=False, timeout=STD_TIMEOUT
                         )
                 else:
-                    hx_start = await harness.aos_remote.evt_hexapodCorrectionStarted.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    hx_start = (
+                        await harness.aos_remote.evt_hexapodCorrectionStarted.next(
+                            flush=False, timeout=STD_TIMEOUT
+                        )
                     )
-                    hx_end = await harness.aos_remote.evt_hexapodCorrectionCompleted.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    hx_end = (
+                        await harness.aos_remote.evt_hexapodCorrectionCompleted.next(
+                            flush=False, timeout=STD_TIMEOUT
+                        )
                     )
                     ats_start = await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
                         flush=False, timeout=STD_TIMEOUT
@@ -705,7 +709,7 @@ class TestCSC(unittest.TestCase):
 
     def test_spectrograph_offsets(self):
         """Test offsets command and handling of offsets during filter/grating
-         changes."""
+        changes."""
 
         async def doit(atspectrograph=True, online_before_ataos=False):
 
@@ -862,8 +866,10 @@ class TestCSC(unittest.TestCase):
                         atspectrograph=True, hexapod=True
                     )
 
-                    pointingOffsetSummary = await harness.aos_remote.evt_pointingOffsetSummary.next(
-                        flush=False, timeout=STD_TIMEOUT * 2
+                    pointingOffsetSummary = (
+                        await harness.aos_remote.evt_pointingOffsetSummary.next(
+                            flush=False, timeout=STD_TIMEOUT * 2
+                        )
                     )
                     # check atspectrograph corrections were applied
                     await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
@@ -878,8 +884,10 @@ class TestCSC(unittest.TestCase):
                     timeout=STD_TIMEOUT
                 )
                 # check focus accounting is being done correctly
-                focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.aget(
-                    timeout=STD_TIMEOUT
+                focusOffsetSummary = (
+                    await harness.aos_remote.evt_focusOffsetSummary.aget(
+                        timeout=STD_TIMEOUT
+                    )
                 )
 
                 if atspectrograph:
@@ -982,8 +990,10 @@ class TestCSC(unittest.TestCase):
                 offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
                     flush=False, timeout=STD_TIMEOUT
                 )
-                focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
-                    flush=False, timeout=STD_TIMEOUT
+                focusOffsetSummary = (
+                    await harness.aos_remote.evt_focusOffsetSummary.next(
+                        flush=False, timeout=STD_TIMEOUT
+                    )
                 )
 
                 # offsets should be combined in z
@@ -1050,14 +1060,20 @@ class TestCSC(unittest.TestCase):
                     harness.atptg.cmd_poriginOffset.callback.assert_called()
 
                     # check focus model updates were applied
-                    offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    offset_applied = (
+                        await harness.aos_remote.evt_correctionOffsets.next(
+                            flush=False, timeout=STD_TIMEOUT
+                        )
                     )
-                    focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    focusOffsetSummary = (
+                        await harness.aos_remote.evt_focusOffsetSummary.next(
+                            flush=False, timeout=STD_TIMEOUT
+                        )
                     )
-                    pointingOffsetSummary = await harness.aos_remote.evt_pointingOffsetSummary.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    pointingOffsetSummary = (
+                        await harness.aos_remote.evt_pointingOffsetSummary.next(
+                            flush=False, timeout=STD_TIMEOUT
+                        )
                     )
 
                     # offsets should be combined in z
@@ -1131,14 +1147,20 @@ class TestCSC(unittest.TestCase):
                     # check pointing offset was applied
                     harness.atptg.cmd_poriginOffset.callback.assert_called()
 
-                    offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    offset_applied = (
+                        await harness.aos_remote.evt_correctionOffsets.next(
+                            flush=False, timeout=STD_TIMEOUT
+                        )
                     )
-                    focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    focusOffsetSummary = (
+                        await harness.aos_remote.evt_focusOffsetSummary.next(
+                            flush=False, timeout=STD_TIMEOUT
+                        )
                     )
-                    pointingOffsetSummary = await harness.aos_remote.evt_pointingOffsetSummary.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    pointingOffsetSummary = (
+                        await harness.aos_remote.evt_pointingOffsetSummary.next(
+                            flush=False, timeout=STD_TIMEOUT
+                        )
                     )
 
                     # offsets should be combined in z
@@ -1212,8 +1234,10 @@ class TestCSC(unittest.TestCase):
                 offset_applied = await harness.aos_remote.evt_correctionOffsets.aget(
                     timeout=STD_TIMEOUT
                 )
-                focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.aget(
-                    timeout=STD_TIMEOUT
+                focusOffsetSummary = (
+                    await harness.aos_remote.evt_focusOffsetSummary.aget(
+                        timeout=STD_TIMEOUT
+                    )
                 )
 
                 for axis in offset:
@@ -1467,8 +1491,10 @@ class TestCSC(unittest.TestCase):
                     timeout=STD_TIMEOUT, flush=False
                 )
                 # check focus accounting is being done correctly
-                focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.aget(
-                    timeout=STD_TIMEOUT
+                focusOffsetSummary = (
+                    await harness.aos_remote.evt_focusOffsetSummary.aget(
+                        timeout=STD_TIMEOUT
+                    )
                 )
 
                 self.assertAlmostEqual(focusOffsetSummary.wavelength, focus_wave_expect)
@@ -1517,8 +1543,10 @@ class TestCSC(unittest.TestCase):
                 offset_applied = await harness.aos_remote.evt_correctionOffsets.aget(
                     timeout=STD_TIMEOUT
                 )
-                focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.aget(
-                    timeout=STD_TIMEOUT
+                focusOffsetSummary = (
+                    await harness.aos_remote.evt_focusOffsetSummary.aget(
+                        timeout=STD_TIMEOUT
+                    )
                 )
 
                 # offsets should be combined in z
@@ -1602,8 +1630,10 @@ class TestCSC(unittest.TestCase):
                 offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
                     flush=False, timeout=STD_TIMEOUT
                 )
-                focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
-                    flush=False, timeout=STD_TIMEOUT
+                focusOffsetSummary = (
+                    await harness.aos_remote.evt_focusOffsetSummary.next(
+                        flush=False, timeout=STD_TIMEOUT
+                    )
                 )
 
                 # offsets should be combined in z
@@ -1673,8 +1703,10 @@ class TestCSC(unittest.TestCase):
                 offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
                     flush=False, timeout=STD_TIMEOUT * 2
                 )
-                focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
-                    flush=False, timeout=STD_TIMEOUT * 2
+                focusOffsetSummary = (
+                    await harness.aos_remote.evt_focusOffsetSummary.next(
+                        flush=False, timeout=STD_TIMEOUT * 2
+                    )
                 )
 
                 # offsets should be combined in z
@@ -1747,8 +1779,10 @@ class TestCSC(unittest.TestCase):
                 offset_applied2 = await harness.aos_remote.evt_correctionOffsets.next(
                     flush=False, timeout=STD_TIMEOUT
                 )
-                focusOffsetSummary2 = await harness.aos_remote.evt_focusOffsetSummary.next(
-                    flush=False, timeout=STD_TIMEOUT
+                focusOffsetSummary2 = (
+                    await harness.aos_remote.evt_focusOffsetSummary.next(
+                        flush=False, timeout=STD_TIMEOUT
+                    )
                 )
 
                 # check that summaries are unchanged
@@ -1773,8 +1807,10 @@ class TestCSC(unittest.TestCase):
                 offset_applied = await harness.aos_remote.evt_correctionOffsets.aget(
                     timeout=STD_TIMEOUT
                 )
-                focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.aget(
-                    timeout=STD_TIMEOUT
+                focusOffsetSummary = (
+                    await harness.aos_remote.evt_focusOffsetSummary.aget(
+                        timeout=STD_TIMEOUT
+                    )
                 )
 
                 for axis in offset:
@@ -1828,7 +1864,7 @@ class TestCSC(unittest.TestCase):
 
     def test_enable_disable_corrections(self):
         """Test enabling and disabling corrections, one at a time,
-         then all at once."""
+        then all at once."""
 
         async def doit(telescope_online=False):
 
@@ -1988,8 +2024,10 @@ class TestCSC(unittest.TestCase):
                     )
 
                     # grab correction enabled event
-                    correctionEnabledEvent = await harness.aos_remote.evt_correctionEnabled.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    correctionEnabledEvent = (
+                        await harness.aos_remote.evt_correctionEnabled.next(
+                            flush=False, timeout=STD_TIMEOUT
+                        )
                     )
 
                     # let the loop turn a few times to make sure it's stable
@@ -2035,8 +2073,10 @@ class TestCSC(unittest.TestCase):
                             # check pointing offset was applied
                             harness.atptg.cmd_poriginOffset.callback.assert_called()
                             # check offsets were applied correctly
-                            focusOffsetSummary = await harness.aos_remote.evt_focusOffsetSummary.next(
-                                flush=False, timeout=STD_TIMEOUT
+                            focusOffsetSummary = (
+                                await harness.aos_remote.evt_focusOffsetSummary.next(
+                                    flush=False, timeout=STD_TIMEOUT
+                                )
                             )
                             self.assertAlmostEqual(
                                 focusOffsetSummary.total,
@@ -2050,8 +2090,10 @@ class TestCSC(unittest.TestCase):
                             self.assertAlmostEqual(
                                 focusOffsetSummary.disperser, disperserFocusOffset
                             )
-                            pointingOffsetSummary = await harness.aos_remote.evt_pointingOffsetSummary.next(
-                                flush=False, timeout=STD_TIMEOUT
+                            pointingOffsetSummary = (
+                                await harness.aos_remote.evt_pointingOffsetSummary.next(
+                                    flush=False, timeout=STD_TIMEOUT
+                                )
                             )
                             # pointingOffsets are arrays, so loop over values
                             # individually
@@ -2116,8 +2158,10 @@ class TestCSC(unittest.TestCase):
                     await harness.aos_remote.cmd_disableCorrection.set_start(
                         **specific_correction_to_disable
                     )
-                    correctionEnabledEvent = await harness.aos_remote.evt_correctionEnabled.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    correctionEnabledEvent = (
+                        await harness.aos_remote.evt_correctionEnabled.next(
+                            flush=False, timeout=STD_TIMEOUT
+                        )
                     )
 
                     for test_corr in corrections:
@@ -2140,8 +2184,10 @@ class TestCSC(unittest.TestCase):
                 await harness.aos_remote.cmd_enableCorrection.set_start(
                     enableAll=True, moveWhileExposing=False
                 )
-                correctionEnabledEvent = await harness.aos_remote.evt_correctionEnabled.next(
-                    flush=False, timeout=STD_TIMEOUT
+                correctionEnabledEvent = (
+                    await harness.aos_remote.evt_correctionEnabled.next(
+                        flush=False, timeout=STD_TIMEOUT
+                    )
                 )
 
                 # All corrections should all be true, except moveWhileExposing
@@ -2176,8 +2222,10 @@ class TestCSC(unittest.TestCase):
                 await harness.aos_remote.cmd_disableCorrection.set_start(
                     disableAll=True
                 )
-                correctionEnabledEvent = await harness.aos_remote.evt_correctionEnabled.next(
-                    flush=False, timeout=STD_TIMEOUT
+                correctionEnabledEvent = (
+                    await harness.aos_remote.evt_correctionEnabled.next(
+                        flush=False, timeout=STD_TIMEOUT
+                    )
                 )
 
                 # They should all be False
@@ -2216,7 +2264,8 @@ class TestCSC(unittest.TestCase):
         asyncio.get_event_loop().run_until_complete(doit(telescope_online=True))
 
     def test_target_handling(self):
-        """Test changing of targets to verify pressures are adjusted correctly
+        """Test changing of targets to verify pressures are adjusted
+        correctly.
         """
 
         async def doit():
@@ -2363,8 +2412,8 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(harness.csc.target_azimuth, t_az)
 
                 # Check that m1 pressure is not equal to current position
-                m1_pressure_expected_to_be_commanded = harness.csc.model.get_correction_m1(
-                    t_az, (t_el + t_el2) / 2.0
+                m1_pressure_expected_to_be_commanded = (
+                    harness.csc.model.get_correction_m1(t_az, (t_el + t_el2) / 2.0)
                 )
 
                 # returns a call object, so need to take the first call,
@@ -2385,8 +2434,8 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(harness.csc.target_azimuth, t_az)
 
                 # Check that m1 pressure is not equal to current position
-                m1_pressure_expected_to_be_commanded = harness.csc.model.get_correction_m1(
-                    t_az, (t_el_1b + t_el2) / 2.0
+                m1_pressure_expected_to_be_commanded = (
+                    harness.csc.model.get_correction_m1(t_az, (t_el_1b + t_el2) / 2.0)
                 )
                 commanded_pressure = (
                     ((harness.pnematics.cmd_m1SetPressure.callback.call_args)[0])[0]
@@ -2403,8 +2452,8 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(harness.csc.target_azimuth, t_az)
 
                 # Check that m1 pressure is not equal to current position
-                m1_pressure_expected_to_be_commanded = harness.csc.model.get_correction_m1(
-                    t_az, t_el2
+                m1_pressure_expected_to_be_commanded = (
+                    harness.csc.model.get_correction_m1(t_az, t_el2)
                 )
                 commanded_pressure = (
                     ((harness.pnematics.cmd_m1SetPressure.callback.call_args)[0])[0]
@@ -2429,8 +2478,8 @@ class TestCSC(unittest.TestCase):
 
                 # Check that m1 pressure is not equal to current position
                 # On the way up the air pressure follows telescope position
-                m1_pressure_expected_to_be_commanded = harness.csc.model.get_correction_m1(
-                    t_az, t_el_1b
+                m1_pressure_expected_to_be_commanded = (
+                    harness.csc.model.get_correction_m1(t_az, t_el_1b)
                 )
                 commanded_pressure = (
                     ((harness.pnematics.cmd_m1SetPressure.callback.call_args)[0])[0]
@@ -2462,7 +2511,8 @@ async def publish_mountEncoders(harness, azimuth, elevation, ntimes=5):
         )
         # Assume nasmyth is the same as the azimuth
         harness.atmcs.tel_mount_Nasmyth_Encoders.set_put(
-            nasmyth1CalculatedAngle=_azimuth, nasmyth2CalculatedAngle=_azimuth,
+            nasmyth1CalculatedAngle=_azimuth,
+            nasmyth2CalculatedAngle=_azimuth,
         )
         await asyncio.sleep(salobj.base_csc.HEARTBEAT_INTERVAL)
 
