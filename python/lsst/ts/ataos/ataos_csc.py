@@ -430,8 +430,10 @@ class ATAOS(ConfigurableCsc):
             )
 
             try:
-                disperser_data = await self.atspectrograph.evt_reportedDisperserPosition.aget(
-                    timeout=self.fast_timeout
+                disperser_data = (
+                    await self.atspectrograph.evt_reportedDisperserPosition.aget(
+                        timeout=self.fast_timeout
+                    )
                 )
             except asyncio.TimeoutError:
                 self.log.warning(
@@ -854,7 +856,7 @@ class ATAOS(ConfigurableCsc):
             )
 
     async def do_resetOffset(self, data):
-        """ Reset userApplied provided offsets on a specific axis or all.
+        """Reset userApplied provided offsets on a specific axis or all.
         Grating/Filter focus and pointing offsets will remain.
 
         Offsets can only be reset if the appropriate correction loop is closed.
@@ -1609,7 +1611,7 @@ class ATAOS(ConfigurableCsc):
         self.current_positions["v"] = data.positionV
 
     def m1_pressure_monitor_callback(self, data):
-        """ Callback function to monitor M1 pressure
+        """Callback function to monitor M1 pressure
 
         Parameters
         ----------
@@ -1619,7 +1621,7 @@ class ATAOS(ConfigurableCsc):
         self.current_positions["m1"] = data.pressure
 
     def m2_pressure_monitor_callback(self, data):
-        """ Callback function to monitor M2 pressure
+        """Callback function to monitor M2 pressure
 
         Parameters
         ----------

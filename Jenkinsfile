@@ -2,7 +2,7 @@ pipeline {
     agent any
     environment {
         container_name = "c_${BUILD_ID}_${JENKINS_NODE_COOKIE}"
-        image_tag = "master"
+        image_tag = "develop"
         user_ci = credentials('lsst-io')
         work_branches = "${GIT_BRANCH} ${CHANGE_BRANCH} develop"
     }
