@@ -1510,7 +1510,7 @@ class ATAOS(ConfigurableCsc):
         self.log.info(
             "Caught ATSpectrograph filter change, calculating correction offsets"
         )
-        # Add a correction cycle to accomodate the change
+        # Add a correction cycle to accommodate the change
         self.atspectrograph_corrections_required += 1
         # Relative offset are to be applied to the model
         # so therefore we need to subtract offset already in place for the
@@ -1541,7 +1541,7 @@ class ATAOS(ConfigurableCsc):
         self.current_atspectrograph_filter_name = data.name
         self.current_atspectrograph_central_wavelength = data.centralWavelength
         # Apply the offsets to the focusOffsetSummary event
-        self.focus_offset_per_category["total"] += data.focusOffset
+        self.focus_offset_per_category["total"] += _offset_to_apply
         self.focus_offset_per_category["filter"] = data.focusOffset
         # Always default focus to filter central wavelength
         self.focus_offset_per_category["wavelength"] = 0.0
@@ -1588,7 +1588,7 @@ class ATAOS(ConfigurableCsc):
         self.current_atspectrograph_disperser_name = data.name
 
         # Apply the offsets to the focusOffsetSummary event
-        self.focus_offset_per_category["total"] += data.focusOffset
+        self.focus_offset_per_category["total"] += _offset_to_apply
         self.focus_offset_per_category["disperser"] = data.focusOffset
         self.focus_offset_yet_to_be_applied += _offset_to_apply
 

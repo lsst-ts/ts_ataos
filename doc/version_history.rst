@@ -6,6 +6,13 @@
 Version History
 ###############
 
+v1.7.4
+------
+
+Changes:
+
+  * Fix bug in focus offset accounting
+
 v1.7.3
 ------
 
