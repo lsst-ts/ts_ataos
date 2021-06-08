@@ -1371,13 +1371,13 @@ class TestCSC(unittest.TestCase):
                 # filter/disperser positions will get published
 
                 filter_name, filter_name2 = "test_filt1", "test_filt2"
-                filter_focus_offset, filter_focus_offset2 = 0.03, 0.0
+                filter_focus_offset, filter_focus_offset2 = 0.03, 0.01
                 filter_central_wavelength, filter_central_wavelength2 = 707.0, 700
                 filter_pointing_offsets = np.array([0.1, -0.1])
                 filter_pointing_offsets2 = np.array([0.2, -0.2])
 
                 disperser_name, disperser_name2 = "test_disp1", "test_disp2"
-                disperser_focus_offset, disperser_focus_offset2 = 0.1, 0.0
+                disperser_focus_offset, disperser_focus_offset2 = 0.3, 0.1
                 disperser_pointing_offsets = np.array([0.05, -0.05])
                 disperser_pointing_offsets2 = np.array([0.13, -0.13])
 
@@ -1623,8 +1623,6 @@ class TestCSC(unittest.TestCase):
                 offset_call_count_filt2 = (
                     harness.atptg.cmd_poriginOffset.callback.call_count
                 )
-                # FIXME
-                logger.debug(f"offset_call_count_filt2 is {offset_call_count_filt2}")
 
                 # check focus model updates were applied
                 offset_applied = await harness.aos_remote.evt_correctionOffsets.next(
@@ -1654,6 +1652,7 @@ class TestCSC(unittest.TestCase):
                                 + disperser_focus_offset
                                 + filter_focus_offset2,
                                 getattr(offset_applied, axis),
+                                places=6,
                             )
 
                 # check that focus summary is correct
@@ -1741,10 +1740,12 @@ class TestCSC(unittest.TestCase):
                 # should be zero!
                 self.assertAlmostEqual(focusOffsetSummary.wavelength, focus_wave_expect)
 
-                # Now put in a filter that results in zero changes required
-                # to the telescope setup, but make sure events are all
+                # Now republish the filter and disperser events, which is
+                # common occurrence whenever the take_object command is
+                # used with a populated filter/disperser keyword.
+                # that results in zero changes required but all events get
                 # re-published.
-                logger.debug("Putting in filter2b, which is filter2 again")
+                logger.debug("Republishing filter/disperser events")
                 # flush events then change filters
                 # wavelength offset should now go to zero
                 harness.aos_remote.evt_correctionOffsets.flush()
@@ -1753,6 +1754,12 @@ class TestCSC(unittest.TestCase):
                 harness.aos_remote.evt_atspectrographCorrectionStarted.flush()
                 harness.aos_remote.evt_atspectrographCorrectionCompleted.flush()
 
+                harness.atspectrograph.evt_reportedDisperserPosition.set_put(
+                    name=disperser_name2,
+                    focusOffset=disperser_focus_offset2,
+                    pointingOffsets=disperser_pointing_offsets2,
+                    force_output=True,
+                )
                 harness.atspectrograph.evt_reportedFilterPosition.set_put(
                     name=filter_name2,
                     centralWavelength=filter_central_wavelength2,
@@ -1762,12 +1769,20 @@ class TestCSC(unittest.TestCase):
                 )
 
                 # Timeouts extended as filter/disperser changes can take ~5s
-                await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
-                    timeout=STD_TIMEOUT * 2, flush=False
-                )
-                await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
-                    timeout=STD_TIMEOUT, flush=False
-                )
+                for j in range(2):
+                    _evt1 = await harness.aos_remote.evt_atspectrographCorrectionStarted.next(
+                        timeout=STD_TIMEOUT * 2, flush=False
+                    )
+                    logger.debug(
+                        f"Event #{j} - evt_atspectrographCorrectionStarted is: {_evt1}"
+                    )
+                for j in range(2):
+                    _evt2 = await harness.aos_remote.evt_atspectrographCorrectionCompleted.next(
+                        timeout=STD_TIMEOUT, flush=False
+                    )
+                    logger.debug(
+                        f"Event #{j} - evt_atspectrographCorrectionCompleted is: {_evt2}"
+                    )
                 # check pointing offset was *NOT* applied since no
                 # changes were made
                 offset_call_count_filt2b = (
@@ -1776,12 +1791,12 @@ class TestCSC(unittest.TestCase):
                 self.assertEqual(offset_call_count_filt2b, offset_call_count_disp2)
 
                 # check focus model updates were applied
-                offset_applied2 = await harness.aos_remote.evt_correctionOffsets.next(
-                    flush=False, timeout=STD_TIMEOUT
+                offset_applied2 = await harness.aos_remote.evt_correctionOffsets.aget(
+                    timeout=STD_TIMEOUT
                 )
                 focusOffsetSummary2 = (
-                    await harness.aos_remote.evt_focusOffsetSummary.next(
-                        flush=False, timeout=STD_TIMEOUT
+                    await harness.aos_remote.evt_focusOffsetSummary.aget(
+                        timeout=STD_TIMEOUT
                     )
                 )
 
