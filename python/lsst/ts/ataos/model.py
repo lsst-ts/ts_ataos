@@ -44,6 +44,21 @@ class Model:
             "v": 0.0,
         }
 
+        # Hexapod sensitivity matrix, this is to account for cross terms
+        # between the axis. By default, there are no cross terms. This can be
+        # used, for instance, to add automatic tip-tilt correction for a given
+        # hexapod translation (x/y).
+        self._hexapod_sensitivity_matrix = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],  # y
+                [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # z
+                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],  # u
+                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],  # v
+                [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],  # w
+            ]
+        )
+
         self.poly_m1 = np.poly1d(self.config["m1"])
         self.poly_m2 = np.poly1d(self.config["m2"])
         self.poly_x = np.poly1d(self.config["hexapod_x"])
@@ -166,14 +181,18 @@ class Model:
         w : float
             [DISABLED] rotation angle with respect to z-axis (degrees)
         """
-        x = self.poly_x(np.cos(np.radians(90.0 - elevation))) + self.offset["x"]
-        y = self.poly_y(np.cos(np.radians(90.0 - elevation))) + self.offset["y"]
-        z = self.poly_z(np.cos(np.radians(90.0 - elevation))) + self.offset["z"]
-        u = self.poly_u(np.cos(np.radians(90.0 - elevation))) + self.offset["u"]
-        v = self.poly_v(np.cos(np.radians(90.0 - elevation))) + self.offset["v"]
-        w = 0.0
+        _offset = np.array(
+            [
+                self.poly_x(np.cos(np.radians(90.0 - elevation))) + self.offset["x"],
+                self.poly_y(np.cos(np.radians(90.0 - elevation))) + self.offset["y"],
+                self.poly_z(np.cos(np.radians(90.0 - elevation))) + self.offset["z"],
+                self.poly_u(np.cos(np.radians(90.0 - elevation))) + self.offset["u"],
+                self.poly_v(np.cos(np.radians(90.0 - elevation))) + self.offset["v"],
+                0.0,
+            ]
+        )
 
-        return x, y, z, u, v, w
+        return np.matmul(_offset, self._hexapod_sensitivity_matrix)
 
     def get_correction_chromatic(self, wavelength):
         """Focus (via z-hexapod offset) correction for specified wavelength.

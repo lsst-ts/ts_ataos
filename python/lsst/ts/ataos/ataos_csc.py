@@ -2064,6 +2064,10 @@ class ATAOS(ConfigurableCsc):
             for key in config.correction_tolerance:
                 self.correction_tolerance[key] = config.correction_tolerance[key]
 
+        self.model.hexapod_sensitivity_matrix = np.array(
+            config.hexapod_sensitivity_matrix
+        )
+
     def atspectrograph_ss_callback(self, data):
         """Callback to monitor summary state from atspectrograph. If this
         arises, then the filter/grating offsets that were previously set
