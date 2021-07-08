@@ -24,5 +24,6 @@ try:
 except ImportError:
     __version__ = "?"
 
+from .config_schema import CONFIG_SCHEMA
 from .ataos_csc import *
 from .model import Model

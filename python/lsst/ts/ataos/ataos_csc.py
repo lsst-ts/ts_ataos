@@ -1,7 +1,6 @@
 import asyncio
 import traceback
 import enum
-import pathlib
 import numpy as np
 import copy
 
@@ -20,6 +19,7 @@ from . import __version__
 
 from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
 
+from .config_schema import CONFIG_SCHEMA
 from .model import Model
 
 __all__ = ["ATAOS", "ShutterState", "DetailedState"]
@@ -74,14 +74,10 @@ class ATAOS(ConfigurableCsc):
         Initialize AT AOS CSC.
         """
 
-        schema_path = (
-            pathlib.Path(__file__).resolve().parents[4].joinpath("schema", "ATAOS.yaml")
-        )
-
         super().__init__(
             "ATAOS",
             index=0,
-            schema_path=schema_path,
+            config_schema=CONFIG_SCHEMA,
             config_dir=config_dir,
             initial_state=initial_state,
         )

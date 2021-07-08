@@ -9,14 +9,9 @@ source:
 build:
   script: python -m pip install --no-deps --ignore-installed .
   script_env:
-    - PATH
-    - PYTHONPATH
     - LD_LIBRARY_PATH
     - OSPL_HOME
-    - PYTHON_BUILD_VERSION
-    - PYTHON_BUILD_LOCATION
     - TS_CONFIG_ATTCS_DIR
-    - LSST_DDS_DOMAIN
 
 test:
   requires:
@@ -30,7 +25,6 @@ test:
     - python
     - bin
     - tests
-    - schema
     - setup.cfg
   commands:
     - py.test
