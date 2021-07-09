@@ -2068,6 +2068,10 @@ class ATAOS(ConfigurableCsc):
             config.hexapod_sensitivity_matrix
         )
 
+        self.model.m1_lut_elevation_limits = config.m1_lut_elevation_limits
+        self.model.m2_lut_elevation_limits = config.m2_lut_elevation_limits
+        self.model.hexapod_lut_elevation_limits = config.hexapod_lut_elevation_limits
+
     def atspectrograph_ss_callback(self, data):
         """Callback to monitor summary state from atspectrograph. If this
         arises, then the filter/grating offsets that were previously set

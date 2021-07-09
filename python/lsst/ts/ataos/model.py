@@ -68,6 +68,10 @@ class Model:
         self.poly_v = np.poly1d(self.config["hexapod_v"])
         self.poly_chromatic = np.poly1d(self.config["chromatic_dependence"])
 
+        self.m1_lut_elevation_limits = [0.0, 90.0]
+        self.m2_lut_elevation_limits = [0.0, 90.0]
+        self.hexapod_lut_elevation_limits = [0.0, 90.0]
+
     def reset_offset(self):
         """Reset all offsets to zero."""
         self.offset = {
@@ -133,7 +137,19 @@ class Model:
         pressure : float
             Pressure to apply (Pascal).
         """
-        return self.poly_m1(np.cos(np.radians(90.0 - elevation))) + self.offset["m1"]
+        return (
+            self.poly_m1(
+                np.cos(
+                    np.radians(
+                        90.0
+                        - self.get_lut_elevation(
+                            elevation, self.m1_lut_elevation_limits
+                        )
+                    )
+                )
+            )
+            + self.offset["m1"]
+        )
 
     def get_correction_m2(self, azimuth, elevation, temperature=None):
         """Correction for m2 support pressure.
@@ -152,7 +168,19 @@ class Model:
         pressure : float
             Pressure to apply (Pascal).
         """
-        return self.poly_m2(np.cos(np.radians(90.0 - elevation))) + self.offset["m2"]
+        return (
+            self.poly_m2(
+                np.cos(
+                    np.radians(
+                        90.0
+                        - self.get_lut_elevation(
+                            elevation, self.m2_lut_elevation_limits
+                        )
+                    )
+                )
+            )
+            + self.offset["m2"]
+        )
 
     def get_correction_hexapod(self, azimuth, elevation, temperature=None):
         """Correction for hexapod position.
@@ -181,13 +209,22 @@ class Model:
         w : float
             [DISABLED] rotation angle with respect to z-axis (degrees)
         """
+        lut_elevation = self.get_lut_elevation(
+            elevation, self.hexapod_lut_elevation_limits
+        )
+
         _offset = np.array(
             [
-                self.poly_x(np.cos(np.radians(90.0 - elevation))) + self.offset["x"],
-                self.poly_y(np.cos(np.radians(90.0 - elevation))) + self.offset["y"],
-                self.poly_z(np.cos(np.radians(90.0 - elevation))) + self.offset["z"],
-                self.poly_u(np.cos(np.radians(90.0 - elevation))) + self.offset["u"],
-                self.poly_v(np.cos(np.radians(90.0 - elevation))) + self.offset["v"],
+                self.poly_x(np.cos(np.radians(90.0 - lut_elevation)))
+                + self.offset["x"],
+                self.poly_y(np.cos(np.radians(90.0 - lut_elevation)))
+                + self.offset["y"],
+                self.poly_z(np.cos(np.radians(90.0 - lut_elevation)))
+                + self.offset["z"],
+                self.poly_u(np.cos(np.radians(90.0 - lut_elevation)))
+                + self.offset["u"],
+                self.poly_v(np.cos(np.radians(90.0 - lut_elevation)))
+                + self.offset["v"],
                 0.0,
             ]
         )
@@ -289,3 +326,25 @@ class Model:
     def chromatic_dependence(self, val):
         self.config["chromatic_dependence"] = val
         self.poly_chromatic = np.poly1d(val)
+
+    @staticmethod
+    def get_lut_elevation(elevation, limits):
+        """Return an elevation inside the rande.
+
+        Parameters
+        ----------
+        elevation: `float`
+            Elevation for the correction.
+        limits: `list` [`float`, `float`]
+            List with the minimum and maximum limits.
+
+        Returns
+        -------
+        `float`
+            Elevation in the closed range (limits[0], limits[1]).
+        """
+        return (
+            elevation
+            if limits[0] <= elevation <= limits[1]
+            else (limits[0] if elevation < limits[0] else limits[1])
+        )

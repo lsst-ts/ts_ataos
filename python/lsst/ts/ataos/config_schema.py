@@ -40,18 +40,55 @@ properties:
     items:
       type: number
     default: [0.]
+  m1_lut_elevation_limits:
+    description: >-
+        Elevation limits for the validity of the M1 pressure LUT. Any values
+        outside this range you be assigned the value at this position.
+    type: array
+    items:
+        type: number
+        minItems: 2
+        maxItems: 2
+    default:
+        - 0.
+        - 90.
   m2:
     description: List of polynomial coefficients for M2 correction equation.
     type: array
     items:
       type: number
     default: [0.]
+  m2_lut_elevation_limits:
+    description: >-
+        Elevation limits for the validity of the M2 pressure LUT. Any values
+        outside this range you be assigned the value at this position.
+    type: array
+    items:
+        type: number
+        minItems: 2
+        maxItems: 2
+    default:
+        - 0.
+        - 90.
   hexapod_x:
     description: List of polynomial coefficients for hexapod x-correction equation.
     type: array
     items:
       type: number
     default: [0.]
+  hexapod_lut_elevation_limits:
+    description: >-
+        Elevation limits for the validity of the hexapod position LUT. Any
+        values outside this range you be assigned the value at this position.
+        This range apply equally for all axis.
+    type: array
+    items:
+        type: number
+        minItems: 2
+        maxItems: 2
+    default:
+        - 0.
+        - 90.
   hexapod_y:
     description: List of polynomial coefficients for hexapod y-correction equation.
     type: array
