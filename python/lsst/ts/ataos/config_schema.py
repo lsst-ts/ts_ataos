@@ -1,4 +1,4 @@
-# This file is part of ts_scheduler.
+# This file is part of ts_ataos.
 #
 # Developed for Vera C. Rubin Observatory Telescope and Site Systems.
 # This product includes software developed by the LSST Project
@@ -43,7 +43,7 @@ properties:
   m1_lut_elevation_limits:
     description: >-
         Elevation limits for the validity of the M1 pressure LUT. Any values
-        outside this range you be assigned the value at this position.
+        outside this range will be assigned the value at this position.
     type: array
     items:
         type: number
@@ -61,7 +61,7 @@ properties:
   m2_lut_elevation_limits:
     description: >-
         Elevation limits for the validity of the M2 pressure LUT. Any values
-        outside this range you be assigned the value at this position.
+        outside this range will be assigned the value at this position.
     type: array
     items:
         type: number
@@ -79,7 +79,7 @@ properties:
   hexapod_lut_elevation_limits:
     description: >-
         Elevation limits for the validity of the hexapod position LUT. Any
-        values outside this range you be assigned the value at this position.
+        values outside this range will be assigned the value at this position.
         This range apply equally for all axis.
     type: array
     items:
