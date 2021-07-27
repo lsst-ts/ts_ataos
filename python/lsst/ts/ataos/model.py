@@ -329,7 +329,7 @@ class Model:
 
     @staticmethod
     def get_lut_elevation(elevation, limits):
-        """Return an elevation inside the rande.
+        """Return an elevation value inside the limits.
 
         Parameters
         ----------
