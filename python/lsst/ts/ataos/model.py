@@ -327,6 +327,23 @@ class Model:
         self.config["chromatic_dependence"] = val
         self.poly_chromatic = np.poly1d(val)
 
+    @property
+    def hexapod_sensitivity_matrix(self):
+        return self._hexapod_sensitivity_matrix.copy()
+
+    @hexapod_sensitivity_matrix.setter
+    def hexapod_sensitivity_matrix(self, val):
+
+        new_value = np.array(val, dtype=float)
+
+        if new_value.shape != self._hexapod_sensitivity_matrix.shape:
+            raise RuntimeError(
+                "Hexapod sensitivity matrix must have shape "
+                f"{self._hexapod_sensitivity_matrix.shape}. Got {new_value.shape}."
+            )
+
+        self._hexapod_sensitivity_matrix = new_value.copy()
+
     @staticmethod
     def get_lut_elevation(elevation, limits):
         """Return an elevation value inside the limits.
