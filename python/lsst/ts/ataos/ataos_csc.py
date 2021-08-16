@@ -904,7 +904,7 @@ class ATAOS(ConfigurableCsc):
                     raise RuntimeError(
                         "m2 correction must be enabled to reset the offset."
                     )
-                elif not self.corrections["hexapod"]:
+                elif data.axis in "xyzuv" and not self.corrections["hexapod"]:
                     raise RuntimeError(
                         "hexapod correction must be enabled to reset the offset."
                     )
