@@ -179,6 +179,40 @@ class TestModel(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.model.hexapod_sensitivity_matrix = bad_hexapod_sensitivity_matrix_6x5
 
+    def test_get_correction_m1_out_of_bound_factor(self):
+
+        correction_m1_lut = 1.0
+
+        self.model.m1_lut_elevation_limits = [20.0, 80]
+
+        m1_out_of_bound_factor = self.model.get_correction_m1_out_of_bound_factor(
+            0.0, correction_m1_lut
+        )
+        self.assertEqual(m1_out_of_bound_factor, -1.0 * correction_m1_lut)
+
+        m1_out_of_bound_factor = self.model.get_correction_m1_out_of_bound_factor(
+            self.model.m1_lut_elevation_limits[0], correction_m1_lut
+        )
+        self.assertEqual(m1_out_of_bound_factor, 0.0)
+
+        for elevation in np.linspace(0.0, self.model.m1_lut_elevation_limits[0]):
+            m1_out_of_bound_factor = self.model.get_correction_m1_out_of_bound_factor(
+                elevation, correction_m1_lut
+            )
+
+            self.assertEqual(
+                m1_out_of_bound_factor,
+                correction_m1_lut
+                * (elevation / self.model.m1_lut_elevation_limits[0] - 1.0),
+            )
+
+        for elevation in np.linspace(self.model.m1_lut_elevation_limits[1], 90.0):
+            m1_out_of_bound_factor = self.model.get_correction_m1_out_of_bound_factor(
+                elevation, correction_m1_lut
+            )
+
+            self.assertEqual(m1_out_of_bound_factor, 0.0)
+
     def copy_values_from_axis(self, test_config, copy_axis):
         check_values = dict(**test_config)
 

@@ -137,7 +137,7 @@ class Model:
         pressure : float
             Pressure to apply (Pascal).
         """
-        return (
+        correction_m1_lut = (
             self.poly_m1(
                 np.cos(
                     np.radians(
@@ -151,15 +151,21 @@ class Model:
             + self.offset["m1"]
         )
 
+        correction_m1_out_of_boud_factor = self.get_correction_m1_out_of_bound_factor(
+            elevation, correction_m1_lut
+        )
+
+        return correction_m1_lut + correction_m1_out_of_boud_factor
+
     def get_correction_m2(self, azimuth, elevation, temperature=None):
         """Correction for m2 support pressure.
 
         Parameters
         ----------
         azimuth : `float`
-            Azimuth position for the correction (degrees).
+            Azimuth position for the correction (degrees). Currently ignored.
         elevation : `float`
-            Elevation position for correction (degrees). Currently ignored.
+            Elevation position for correction (degrees).
         temperature : `float`
             Temperature for correction (C). Currently ignored.
 
@@ -188,9 +194,9 @@ class Model:
         Parameters
         ----------
         azimuth : `float`
-            Azimuth position for the correction (degrees).
+            Azimuth position for the correction (degrees). Currently ignored.
         elevation : `float`
-            Elevation position for correction (degrees). Currently ignored.
+            Elevation position for correction (degrees).
         temperature : `float`
             Temperature for correction (C). Currently ignored.
 
@@ -254,6 +260,36 @@ class Model:
         )
 
         return _chromatic_focus_offset
+
+    def get_correction_m1_out_of_bound_factor(self, elevation, correction_m1_lut):
+        """Return a correction factor for the m1 correction when the elevation
+        is out of bounds.
+
+        The method uses the m1_lut_elevation_limits to determine if the
+        elevation is out of bounds or not. Values lower than the limits are
+        considered out of bounds.
+
+        In these cases, the method will return a value that, when aplied to the
+        m1 correction will cause it to reduce the pressure to zero when the
+        elevation is zero. The correction factor is zero everywhere else.
+
+        The correction is zero if inside the elevation limits.
+
+        Parameters
+        ----------
+        elevation: `float`
+            Elevation position for correction (degrees).
+
+        correction_m1_lut: `float`
+            Value of the m1 correction at the boundary.
+        """
+        return (
+            0.0
+            if elevation >= self.m1_lut_elevation_limits[0]
+            else (
+                correction_m1_lut * (elevation / self.m1_lut_elevation_limits[0] - 1.0)
+            )
+        )
 
     @property
     def m1(self):
