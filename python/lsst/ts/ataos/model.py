@@ -126,9 +126,9 @@ class Model:
         Parameters
         ----------
         azimuth : `float`
-            Azimuth position for the correction (degrees).
+            Azimuth position for the correction (degrees). Currently ignored.
         elevation : `float`
-            Elevation position for correction (degrees). Currently ignored.
+            Elevation position for correction (degrees).
         temperature : `float`
             Temperature for correction (C). Currently ignored.
 
