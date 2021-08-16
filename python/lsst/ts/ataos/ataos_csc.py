@@ -2117,7 +2117,7 @@ class ATAOS(ConfigurableCsc):
         self.pointing_offsets_per_category["disperser"] = np.array([0.0, 0.0])
 
     async def check_atspectrograph(self):
-        """ Check that the atspectrograph is online and enabled"""
+        """Check that the atspectrograph is online and enabled"""
         if self.atspectrograph_summary_state != State.ENABLED:
             raise RuntimeError(
                 f"ATSpectrograph (LATISS) in {self.atspectrograph_summary_state}. "
