@@ -52,6 +52,12 @@ properties:
     default:
         - 0.
         - 90.
+  m1_pressure_minimum:
+    description: >-
+      Minimum pressure (in Pascal) for M1 LUT correction. If the computed
+      correction is bellow this limit, the return value will be the limit.
+    type: number
+    default: 0.0
   m2:
     description: List of polynomial coefficients for M2 correction equation.
     type: array

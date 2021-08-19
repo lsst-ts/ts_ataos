@@ -72,6 +72,8 @@ class Model:
         self.m2_lut_elevation_limits = [0.0, 90.0]
         self.hexapod_lut_elevation_limits = [0.0, 90.0]
 
+        self.m1_pressure_minimum = 0.0
+
     def reset_offset(self):
         """Reset all offsets to zero."""
         self.offset = {
@@ -155,7 +157,13 @@ class Model:
             elevation, correction_m1_lut
         )
 
-        return correction_m1_lut + correction_m1_out_of_boud_factor
+        correction_m1 = correction_m1_lut + correction_m1_out_of_boud_factor
+
+        return (
+            correction_m1
+            if correction_m1 > self.m1_pressure_minimum
+            else self.m1_pressure_minimum
+        )
 
     def get_correction_m2(self, azimuth, elevation, temperature=None):
         """Correction for m2 support pressure.

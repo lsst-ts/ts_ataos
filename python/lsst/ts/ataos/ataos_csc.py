@@ -2069,6 +2069,7 @@ class ATAOS(ConfigurableCsc):
         )
 
         self.model.m1_lut_elevation_limits = config.m1_lut_elevation_limits
+        self.model.m1_pressure_minimum = config.m1_pressure_minimum
         self.model.m2_lut_elevation_limits = config.m2_lut_elevation_limits
         self.model.hexapod_lut_elevation_limits = config.hexapod_lut_elevation_limits
 
