@@ -321,6 +321,13 @@ class ATAOS(ConfigurableCsc):
 
         """
         self.log.debug("At beginning of begin_start")
+        if len(data.settingsToApply) == 0:
+            raise RuntimeError(
+                "No settings provided. ATAOS does not support default configuration. "
+                "You must provide a label or configuration file when starting. "
+                f"Currently available labels are: {self.evt_settingVersions.data.recommendedSettingsLabels}."
+            )
+
         # Populate summary states and create callbacks (unless they
         # have already been created)
         if (
