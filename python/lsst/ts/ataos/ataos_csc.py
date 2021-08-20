@@ -548,6 +548,9 @@ class ATAOS(ConfigurableCsc):
             )
             self.log.exception(e)
 
+        correction_m1_before_disabling = self.corrections["m1"]
+        correction_m2_before_disabling = self.corrections["m2"]
+
         disable = self.cmd_disableCorrection.DataType()
         disable.disableAll = True
         self.mark_corrections(disable, False)
@@ -556,10 +559,13 @@ class ATAOS(ConfigurableCsc):
         # coming from the ENABLED state AND if corrections
         # were enabled
 
-        if self.corrections["m1"] or self.corrections["m2"]:
+        if correction_m1_before_disabling or correction_m2_before_disabling:
+            self.log.debug("Lower mirror to hardpoints")
             await self.lower_mirrors_to_hardpoints(
-                m1=self.corrections["m1"], m2=self.corrections["m2"]
+                m1=correction_m1_before_disabling, m2=correction_m2_before_disabling
             )
+        else:
+            self.log.debug("Both M1 and M2 corrections disabled. Not lowering mirrors.")
 
         self.detailed_state = 0
         self.log.debug("At end of end_disable")
