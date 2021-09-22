@@ -94,6 +94,9 @@ class ATAOS(ConfigurableCsc):
         # fast timeout
         self.fast_timeout = 5.0 * base_csc.HEARTBEAT_INTERVAL
 
+        # time it takes to finish start command
+        self.start_timeout = 10 * self.fast_timeout
+
         # Declare contents related to the asyncio lock
         self.correction_loop_lock = asyncio.Lock()
         self.correction_loop_task = None
@@ -328,6 +331,8 @@ class ATAOS(ConfigurableCsc):
                 f"Currently available labels are: {self.evt_settingVersions.data.recommendedSettingsLabels}."
             )
 
+        # Send in progressh ack with estimate of how long it takes to execute.
+        self.cmd_start.ack_in_progress(data, timeout=self.start_timeout)
         # Populate summary states and create callbacks (unless they
         # have already been created)
         if (
