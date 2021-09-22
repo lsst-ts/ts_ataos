@@ -141,8 +141,14 @@ class TestCSC(unittest.TestCase):
                 # send start; new state is DISABLED
                 cmd_attr = getattr(harness.aos_remote, "cmd_start")
                 harness.aos_remote.evt_summaryState.flush()
-                id_ack = await cmd_attr.start(
-                    timeout=120
+
+                # Test is rejects start command if no settingsToApply is
+                # provided
+                with self.assertRaises(salobj.AckError):
+                    await cmd_attr.set_start(timeout=10)
+
+                id_ack = await cmd_attr.set_start(
+                    settingsToApply="current", timeout=120
                 )  # this one can take longer to execute
                 state = await harness.aos_remote.evt_summaryState.next(
                     flush=False, timeout=5.0
@@ -220,7 +226,10 @@ class TestCSC(unittest.TestCase):
                 for i in range(2):
                     logger.debug(f"On iteration {i}, now enabling")
                     await salobj.set_summary_state(
-                        harness.aos_remote, salobj.State.ENABLED, timeout=60
+                        harness.aos_remote,
+                        salobj.State.ENABLED,
+                        timeout=60,
+                        settingsToApply="current",
                     )
                     await asyncio.sleep(1)
                     logger.debug(f"On iteration {i}, now going to standby")
@@ -349,7 +358,9 @@ class TestCSC(unittest.TestCase):
                 )
 
                 logger.debug("Enabling ataos")
-                await salobj.set_summary_state(harness.aos_remote, salobj.State.ENABLED)
+                await salobj.set_summary_state(
+                    harness.aos_remote, salobj.State.ENABLED, settingsToApply="current"
+                )
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
                 logger.debug("Enabled ataos")
 
@@ -615,7 +626,10 @@ class TestCSC(unittest.TestCase):
                 harness.aos_remote.evt_correctionOffsets.flush()
 
                 await salobj.set_summary_state(
-                    harness.aos_remote, salobj.State.ENABLED, timeout=60
+                    harness.aos_remote,
+                    salobj.State.ENABLED,
+                    settingsToApply="current",
+                    timeout=60,
                 )
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
@@ -807,7 +821,10 @@ class TestCSC(unittest.TestCase):
                 # therefore it is extended here to account for that case.
 
                 await salobj.set_summary_state(
-                    harness.aos_remote, salobj.State.ENABLED, timeout=60
+                    harness.aos_remote,
+                    salobj.State.ENABLED,
+                    timeout=60,
+                    settingsToApply="current",
                 )
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 
@@ -1867,7 +1884,10 @@ class TestCSC(unittest.TestCase):
                 for i in range(2):
                     logger.debug(f"On iteration {i}, now enabling")
                     await salobj.set_summary_state(
-                        harness.aos_remote, salobj.State.ENABLED, timeout=60
+                        harness.aos_remote,
+                        salobj.State.ENABLED,
+                        timeout=60,
+                        settingsToApply="current",
                     )
                     await asyncio.sleep(1)
                     logger.debug(f"On iteration {i}, now going to standby")
@@ -1983,7 +2003,10 @@ class TestCSC(unittest.TestCase):
                 await asyncio.sleep(1)
 
                 await salobj.set_summary_state(
-                    harness.aos_remote, salobj.State.ENABLED, timeout=80
+                    harness.aos_remote,
+                    salobj.State.ENABLED,
+                    timeout=80,
+                    settingsToApply="current",
                 )
                 self.assertEqual(harness.csc.summary_state, salobj.State.ENABLED)
 

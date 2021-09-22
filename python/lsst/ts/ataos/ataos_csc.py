@@ -1,7 +1,6 @@
 import asyncio
 import traceback
 import enum
-import pathlib
 import numpy as np
 import copy
 
@@ -20,6 +19,7 @@ from . import __version__
 
 from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
 
+from .config_schema import CONFIG_SCHEMA
 from .model import Model
 
 __all__ = ["ATAOS", "ShutterState", "DetailedState"]
@@ -74,14 +74,10 @@ class ATAOS(ConfigurableCsc):
         Initialize AT AOS CSC.
         """
 
-        schema_path = (
-            pathlib.Path(__file__).resolve().parents[4].joinpath("schema", "ATAOS.yaml")
-        )
-
         super().__init__(
             "ATAOS",
             index=0,
-            schema_path=schema_path,
+            config_schema=CONFIG_SCHEMA,
             config_dir=config_dir,
             initial_state=initial_state,
         )
@@ -97,6 +93,9 @@ class ATAOS(ConfigurableCsc):
 
         # fast timeout
         self.fast_timeout = 5.0 * base_csc.HEARTBEAT_INTERVAL
+
+        # time it takes to finish start command
+        self.start_timeout = 10 * self.fast_timeout
 
         # Declare contents related to the asyncio lock
         self.correction_loop_lock = asyncio.Lock()
@@ -325,6 +324,15 @@ class ATAOS(ConfigurableCsc):
 
         """
         self.log.debug("At beginning of begin_start")
+        if len(data.settingsToApply) == 0:
+            raise RuntimeError(
+                "No settings provided. ATAOS does not support default configuration. "
+                "You must provide a label or configuration file when starting. "
+                f"Currently available labels are: {self.evt_settingVersions.data.recommendedSettingsLabels}."
+            )
+
+        # Send in progressh ack with estimate of how long it takes to execute.
+        self.cmd_start.ack_in_progress(data, timeout=self.start_timeout)
         # Populate summary states and create callbacks (unless they
         # have already been created)
         if (
@@ -552,6 +560,9 @@ class ATAOS(ConfigurableCsc):
             )
             self.log.exception(e)
 
+        correction_m1_before_disabling = self.corrections["m1"]
+        correction_m2_before_disabling = self.corrections["m2"]
+
         disable = self.cmd_disableCorrection.DataType()
         disable.disableAll = True
         self.mark_corrections(disable, False)
@@ -560,10 +571,13 @@ class ATAOS(ConfigurableCsc):
         # coming from the ENABLED state AND if corrections
         # were enabled
 
-        if self.corrections["m1"] or self.corrections["m2"]:
+        if correction_m1_before_disabling or correction_m2_before_disabling:
+            self.log.debug("Lower mirror to hardpoints")
             await self.lower_mirrors_to_hardpoints(
-                m1=self.corrections["m1"], m2=self.corrections["m2"]
+                m1=correction_m1_before_disabling, m2=correction_m2_before_disabling
             )
+        else:
+            self.log.debug("Both M1 and M2 corrections disabled. Not lowering mirrors.")
 
         self.detailed_state = 0
         self.log.debug("At end of end_disable")
@@ -908,7 +922,7 @@ class ATAOS(ConfigurableCsc):
                     raise RuntimeError(
                         "m2 correction must be enabled to reset the offset."
                     )
-                elif not self.corrections["hexapod"]:
+                elif data.axis in "xyzuv" and not self.corrections["hexapod"]:
                     raise RuntimeError(
                         "hexapod correction must be enabled to reset the offset."
                     )
@@ -2068,6 +2082,15 @@ class ATAOS(ConfigurableCsc):
             for key in config.correction_tolerance:
                 self.correction_tolerance[key] = config.correction_tolerance[key]
 
+        self.model.hexapod_sensitivity_matrix = np.array(
+            config.hexapod_sensitivity_matrix
+        )
+
+        self.model.m1_lut_elevation_limits = config.m1_lut_elevation_limits
+        self.model.m1_pressure_minimum = config.m1_pressure_minimum
+        self.model.m2_lut_elevation_limits = config.m2_lut_elevation_limits
+        self.model.hexapod_lut_elevation_limits = config.hexapod_lut_elevation_limits
+
     def atspectrograph_ss_callback(self, data):
         """Callback to monitor summary state from atspectrograph. If this
         arises, then the filter/grating offsets that were previously set
@@ -2113,7 +2136,7 @@ class ATAOS(ConfigurableCsc):
         self.pointing_offsets_per_category["disperser"] = np.array([0.0, 0.0])
 
     async def check_atspectrograph(self):
-        """ Check that the atspectrograph is online and enabled"""
+        """Check that the atspectrograph is online and enabled"""
         if self.atspectrograph_summary_state != State.ENABLED:
             raise RuntimeError(
                 f"ATSpectrograph (LATISS) in {self.atspectrograph_summary_state}. "

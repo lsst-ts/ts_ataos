@@ -44,6 +44,21 @@ class Model:
             "v": 0.0,
         }
 
+        # Hexapod sensitivity matrix, this is to account for cross terms
+        # between the axis. By default, there are no cross terms. This can be
+        # used, for instance, to add automatic tip-tilt correction for a given
+        # hexapod translation (x/y).
+        self._hexapod_sensitivity_matrix = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],  # y
+                [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],  # z
+                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],  # u
+                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],  # v
+                [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],  # w
+            ]
+        )
+
         self.poly_m1 = np.poly1d(self.config["m1"])
         self.poly_m2 = np.poly1d(self.config["m2"])
         self.poly_x = np.poly1d(self.config["hexapod_x"])
@@ -52,6 +67,12 @@ class Model:
         self.poly_u = np.poly1d(self.config["hexapod_u"])
         self.poly_v = np.poly1d(self.config["hexapod_v"])
         self.poly_chromatic = np.poly1d(self.config["chromatic_dependence"])
+
+        self.m1_lut_elevation_limits = [0.0, 90.0]
+        self.m2_lut_elevation_limits = [0.0, 90.0]
+        self.hexapod_lut_elevation_limits = [0.0, 90.0]
+
+        self.m1_pressure_minimum = 0.0
 
     def reset_offset(self):
         """Reset all offsets to zero."""
@@ -107,9 +128,9 @@ class Model:
         Parameters
         ----------
         azimuth : `float`
-            Azimuth position for the correction (degrees).
+            Azimuth position for the correction (degrees). Currently ignored.
         elevation : `float`
-            Elevation position for correction (degrees). Currently ignored.
+            Elevation position for correction (degrees).
         temperature : `float`
             Temperature for correction (C). Currently ignored.
 
@@ -118,7 +139,31 @@ class Model:
         pressure : float
             Pressure to apply (Pascal).
         """
-        return self.poly_m1(np.cos(np.radians(90.0 - elevation))) + self.offset["m1"]
+        correction_m1_lut = (
+            self.poly_m1(
+                np.cos(
+                    np.radians(
+                        90.0
+                        - self.get_lut_elevation(
+                            elevation, self.m1_lut_elevation_limits
+                        )
+                    )
+                )
+            )
+            + self.offset["m1"]
+        )
+
+        correction_m1_out_of_boud_factor = self.get_correction_m1_out_of_bound_factor(
+            elevation, correction_m1_lut
+        )
+
+        correction_m1 = correction_m1_lut + correction_m1_out_of_boud_factor
+
+        return (
+            correction_m1
+            if correction_m1 > self.m1_pressure_minimum
+            else self.m1_pressure_minimum
+        )
 
     def get_correction_m2(self, azimuth, elevation, temperature=None):
         """Correction for m2 support pressure.
@@ -126,9 +171,9 @@ class Model:
         Parameters
         ----------
         azimuth : `float`
-            Azimuth position for the correction (degrees).
+            Azimuth position for the correction (degrees). Currently ignored.
         elevation : `float`
-            Elevation position for correction (degrees). Currently ignored.
+            Elevation position for correction (degrees).
         temperature : `float`
             Temperature for correction (C). Currently ignored.
 
@@ -137,7 +182,19 @@ class Model:
         pressure : float
             Pressure to apply (Pascal).
         """
-        return self.poly_m2(np.cos(np.radians(90.0 - elevation))) + self.offset["m2"]
+        return (
+            self.poly_m2(
+                np.cos(
+                    np.radians(
+                        90.0
+                        - self.get_lut_elevation(
+                            elevation, self.m2_lut_elevation_limits
+                        )
+                    )
+                )
+            )
+            + self.offset["m2"]
+        )
 
     def get_correction_hexapod(self, azimuth, elevation, temperature=None):
         """Correction for hexapod position.
@@ -145,9 +202,9 @@ class Model:
         Parameters
         ----------
         azimuth : `float`
-            Azimuth position for the correction (degrees).
+            Azimuth position for the correction (degrees). Currently ignored.
         elevation : `float`
-            Elevation position for correction (degrees). Currently ignored.
+            Elevation position for correction (degrees).
         temperature : `float`
             Temperature for correction (C). Currently ignored.
 
@@ -166,14 +223,27 @@ class Model:
         w : float
             [DISABLED] rotation angle with respect to z-axis (degrees)
         """
-        x = self.poly_x(np.cos(np.radians(90.0 - elevation))) + self.offset["x"]
-        y = self.poly_y(np.cos(np.radians(90.0 - elevation))) + self.offset["y"]
-        z = self.poly_z(np.cos(np.radians(90.0 - elevation))) + self.offset["z"]
-        u = self.poly_u(np.cos(np.radians(90.0 - elevation))) + self.offset["u"]
-        v = self.poly_v(np.cos(np.radians(90.0 - elevation))) + self.offset["v"]
-        w = 0.0
+        lut_elevation = self.get_lut_elevation(
+            elevation, self.hexapod_lut_elevation_limits
+        )
 
-        return x, y, z, u, v, w
+        _offset = np.array(
+            [
+                self.poly_x(np.cos(np.radians(90.0 - lut_elevation)))
+                + self.offset["x"],
+                self.poly_y(np.cos(np.radians(90.0 - lut_elevation)))
+                + self.offset["y"],
+                self.poly_z(np.cos(np.radians(90.0 - lut_elevation)))
+                + self.offset["z"],
+                self.poly_u(np.cos(np.radians(90.0 - lut_elevation)))
+                + self.offset["u"],
+                self.poly_v(np.cos(np.radians(90.0 - lut_elevation)))
+                + self.offset["v"],
+                0.0,
+            ]
+        )
+
+        return np.matmul(_offset, self._hexapod_sensitivity_matrix)
 
     def get_correction_chromatic(self, wavelength):
         """Focus (via z-hexapod offset) correction for specified wavelength.
@@ -198,6 +268,36 @@ class Model:
         )
 
         return _chromatic_focus_offset
+
+    def get_correction_m1_out_of_bound_factor(self, elevation, correction_m1_lut):
+        """Return a correction factor for the m1 correction when the elevation
+        is out of bounds.
+
+        The method uses the m1_lut_elevation_limits to determine if the
+        elevation is out of bounds or not. Values lower than the limits are
+        considered out of bounds.
+
+        In these cases, the method will return a value that, when aplied to the
+        m1 correction will cause it to reduce the pressure to zero when the
+        elevation is zero. The correction factor is zero everywhere else.
+
+        The correction is zero if inside the elevation limits.
+
+        Parameters
+        ----------
+        elevation: `float`
+            Elevation position for correction (degrees).
+
+        correction_m1_lut: `float`
+            Value of the m1 correction at the boundary.
+        """
+        return (
+            0.0
+            if elevation >= self.m1_lut_elevation_limits[0]
+            else (
+                correction_m1_lut * (elevation / self.m1_lut_elevation_limits[0] - 1.0)
+            )
+        )
 
     @property
     def m1(self):
@@ -270,3 +370,42 @@ class Model:
     def chromatic_dependence(self, val):
         self.config["chromatic_dependence"] = val
         self.poly_chromatic = np.poly1d(val)
+
+    @property
+    def hexapod_sensitivity_matrix(self):
+        return self._hexapod_sensitivity_matrix.copy()
+
+    @hexapod_sensitivity_matrix.setter
+    def hexapod_sensitivity_matrix(self, val):
+
+        new_value = np.array(val, dtype=float)
+
+        if new_value.shape != self._hexapod_sensitivity_matrix.shape:
+            raise RuntimeError(
+                "Hexapod sensitivity matrix must have shape "
+                f"{self._hexapod_sensitivity_matrix.shape}. Got {new_value.shape}."
+            )
+
+        self._hexapod_sensitivity_matrix = new_value.copy()
+
+    @staticmethod
+    def get_lut_elevation(elevation, limits):
+        """Return an elevation value inside the limits.
+
+        Parameters
+        ----------
+        elevation: `float`
+            Elevation for the correction.
+        limits: `list` [`float`, `float`]
+            List with the minimum and maximum limits.
+
+        Returns
+        -------
+        `float`
+            Elevation in the closed range (limits[0], limits[1]).
+        """
+        return (
+            elevation
+            if limits[0] <= elevation <= limits[1]
+            else (limits[0] if elevation < limits[0] else limits[1])
+        )
