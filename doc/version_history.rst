@@ -6,6 +6,13 @@
 Version History
 ###############
 
+v1.8.1
+------
+
+Changes:
+
+  * Fix issue with sending resetOffset that would always reset the focus offset.
+
 v1.8.0
 ------
 

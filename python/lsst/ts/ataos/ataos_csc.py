@@ -928,26 +928,27 @@ class ATAOS(ConfigurableCsc):
                     )
 
                 # Apply the offset
-                self.model.set_offset(data.axis, 0.0)
+                if self.corrections["atspectrograph"] and data.axis == "z":
+                    # If reseting focus (axis = z) and atspectrograph
+                    # correction is on then we must add back in the filter,
+                    # grating and wavelength offsets best to do this
+                    # immediately and not later in a loop as it'll be confusing
+                    # to see large offsets pop up when the loop comes on rather
+                    # then when the reset command is set.
+                    _offsetToApply = (
+                        self.focus_offset_per_category["filter"]
+                        + self.focus_offset_per_category["disperser"]
+                        + self.focus_offset_per_category["wavelength"]
+                    )
+                    self.model.set_offset("z", _offsetToApply)
+                else:
+                    self.model.set_offset(data.axis, 0.0)
+
             else:
                 raise RuntimeError(
                     f"Axis {data.axis} invalid. Must be one of "
                     "m1, m2, x, y, z, u, v, all or an empty string with length zero."
                 )
-
-            # if correcting for atspectrograph setup then we must add back in
-            # to the filter/grating/wavelength offsets
-            # best to do this immediately and not later in a loop as it'll be
-            # confusing to see large offsets pop up when the loop comes on
-            # rather then when the reset command is set
-            if "atspectrograph" in self.corrections:
-                _offsetToApply = (
-                    self.focus_offset_per_category["filter"]
-                    + self.focus_offset_per_category["disperser"]
-                    + self.focus_offset_per_category["wavelength"]
-                )
-
-                self.model.set_offset("z", _offsetToApply)
 
             # Do not reset the filter/grating offsets, but reset the others
             self.focus_offset_per_category["total"] = self.model.offset["z"]
