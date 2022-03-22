@@ -1,3 +1,4 @@
+import typing
 import unittest
 import numpy as np
 import logging
@@ -7,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class TestModel(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.model = Model(logger)
 
         # test default configuration
@@ -17,11 +18,11 @@ class TestModel(unittest.TestCase):
         self.test_temperatures = np.linspace(-1.0, 30.0, 3)
         self.test_wavelengths = np.linspace(320.0, 1100.0, 10)  # min, max, steps
 
-    def test_corrections_default_values(self):
+    def test_corrections_default_values(self) -> None:
 
         self.assert_ataos_corrections(self.get_zero_test_config())
 
-    def test_corrections_random_values(self):
+    def test_corrections_random_values(self) -> None:
 
         test_config = self.get_random_value_test_config()
 
@@ -40,7 +41,7 @@ class TestModel(unittest.TestCase):
                     self.model.get_correction_chromatic(wave - 700),
                 )
 
-    def test_corrections_hexapod_sensitivity_matrix_x(self):
+    def test_corrections_hexapod_sensitivity_matrix_x(self) -> None:
 
         # This sensitivity matrix will make the correction in x propaget to all
         # other axis, while nullifying the correction on the axis itself.
@@ -69,7 +70,7 @@ class TestModel(unittest.TestCase):
             hexapod_sensitivity_matrix_propagete_axis, test_config, check_values
         )
 
-    def test_corrections_hexapod_sensitivity_matrix_y(self):
+    def test_corrections_hexapod_sensitivity_matrix_y(self) -> None:
 
         hexapod_sensitivity_matrix_propagete_axis = np.array(
             [
@@ -92,7 +93,7 @@ class TestModel(unittest.TestCase):
             hexapod_sensitivity_matrix_propagete_axis, test_config, check_values
         )
 
-    def test_corrections_hexapod_sensitivity_matrix_z(self):
+    def test_corrections_hexapod_sensitivity_matrix_z(self) -> None:
 
         hexapod_sensitivity_matrix_propagete_axis = np.array(
             [
@@ -115,7 +116,7 @@ class TestModel(unittest.TestCase):
             hexapod_sensitivity_matrix_propagete_axis, test_config, check_values
         )
 
-    def test_get_lut_elevation(self):
+    def test_get_lut_elevation(self) -> None:
 
         limits = [20.0, 80.0]
 
@@ -130,7 +131,7 @@ class TestModel(unittest.TestCase):
         for inclination in [82.5, 85.0, 87.5, 90.0]:
             self.assertEqual(self.model.get_lut_elevation(inclination, limits), 80.0)
 
-    def test_set_hexapod_sensitivity_matrix_as_list(self):
+    def test_set_hexapod_sensitivity_matrix_as_list(self) -> None:
 
         new_hexapod_sensitivity_matrix = [
             [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x
@@ -150,7 +151,7 @@ class TestModel(unittest.TestCase):
             for value_original, value_set in zip(line_original, line_set):
                 self.assertEqual(value_original, value_set)
 
-    def test_set_hexapod_sensitivity_matrix_wrong_size(self):
+    def test_set_hexapod_sensitivity_matrix_wrong_size(self) -> None:
 
         bad_hexapod_sensitivity_matrix_5x6 = np.array(
             [
@@ -179,7 +180,7 @@ class TestModel(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.model.hexapod_sensitivity_matrix = bad_hexapod_sensitivity_matrix_6x5
 
-    def test_get_correction_m1_out_of_bound_factor(self):
+    def test_get_correction_m1_out_of_bound_factor(self) -> None:
 
         correction_m1_lut = 1.0
 
@@ -213,7 +214,11 @@ class TestModel(unittest.TestCase):
 
             self.assertEqual(m1_out_of_bound_factor, 0.0)
 
-    def copy_values_from_axis(self, test_config, copy_axis):
+    def copy_values_from_axis(
+        self,
+        test_config: typing.Dict[str, typing.Any],
+        copy_axis: str,
+    ) -> typing.Dict[str, typing.Any]:
         check_values = dict(**test_config)
 
         for index, axis in enumerate("xyzuv"):
@@ -222,8 +227,11 @@ class TestModel(unittest.TestCase):
         return check_values
 
     def run_test_corrections_hexapod_sensitivity_matrix(
-        self, test_hexapod_sensitivity_matrix, test_config, check_values
-    ):
+        self,
+        test_hexapod_sensitivity_matrix: np.ndarray,
+        test_config: typing.Dict[str, typing.Any],
+        check_values: typing.Dict[str, typing.Any],
+    ) -> None:
 
         self.model.hexapod_sensitivity_matrix = test_hexapod_sensitivity_matrix
 
@@ -231,7 +239,9 @@ class TestModel(unittest.TestCase):
 
         self.assert_ataos_corrections(check_values)
 
-    def assert_ataos_corrections(self, corrections):
+    def assert_ataos_corrections(
+        self, corrections: typing.Dict[str, typing.Any]
+    ) -> None:
 
         # correction is a polynomial so all values should be equal to the
         # values on test_config
@@ -257,7 +267,7 @@ class TestModel(unittest.TestCase):
                         )
 
     @staticmethod
-    def get_random_value_test_config():
+    def get_random_value_test_config() -> typing.Dict[str, typing.List[np.ndarray]]:
         return {
             "m1": [np.random.rand()],
             "m2": [np.random.rand()],
@@ -270,7 +280,7 @@ class TestModel(unittest.TestCase):
         }
 
     @staticmethod
-    def get_zero_test_config():
+    def get_zero_test_config() -> typing.Dict[str, typing.List[float]]:
         return {
             "m1": [0.0],
             "m2": [0.0],
@@ -282,7 +292,9 @@ class TestModel(unittest.TestCase):
             "chromatic_dependence": [0.0],
         }
 
-    def set_model_test_config_values(self, test_config):
+    def set_model_test_config_values(
+        self, test_config: typing.Dict[str, typing.Any]
+    ) -> None:
         for key in test_config:
             setattr(self.model, key, test_config[key])
 

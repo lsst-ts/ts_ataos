@@ -1,17 +1,19 @@
 import asyncio
 import traceback
 import enum
+import typing
 import numpy as np
 import copy
 
+from lsst.ts import utils
+
 from lsst.ts.salobj import (
-    base_csc,
     ConfigurableCsc,
     Remote,
     State,
     AckError,
     SalRetCode,
-    make_done_future,
+    type_hints,
 )
 
 from lsst.ts.idl.enums import ATPneumatics
@@ -52,12 +54,12 @@ class DetailedState(enum.IntEnum):
     https://confluence.lsstcorp.org/display/SYSENG/SAL+constraints+and+recommendations
     """
 
-    IDLE = 0
-    M1 = 1 << 1  # Correction to M1 pressure running
-    M2 = 1 << 2  # Correction to M2 pressure running
-    HEXAPOD = 1 << 3  # Hexapod correction running
-    FOCUS = 1 << 4  # Focus correction running -- NOT YET IMPLEMENTED
-    ATSPECTROGRAPH = 1 << 5  # Pointing/Focus correction running
+    IDLE = np.uint8(0)
+    M1 = np.uint8(1 << 1)  # Correction to M1 pressure running
+    M2 = np.uint8(1 << 2)  # Correction to M2 pressure running
+    HEXAPOD = np.uint8(1 << 3)  # Hexapod correction running
+    FOCUS = np.uint8(1 << 4)  # Focus correction running -- NOT YET IMPLEMENTED
+    ATSPECTROGRAPH = np.uint8(1 << 5)  # Pointing/Focus correction running
 
 
 class ATAOS(ConfigurableCsc):
@@ -69,7 +71,11 @@ class ATAOS(ConfigurableCsc):
     valid_simulation_modes = (0,)
     version = __version__
 
-    def __init__(self, config_dir=None, initial_state=State.STANDBY):
+    def __init__(
+        self,
+        config_dir: typing.Optional[str] = None,
+        initial_state: State = State.STANDBY,
+    ) -> None:
         """
         Initialize AT AOS CSC.
         """
@@ -84,31 +90,29 @@ class ATAOS(ConfigurableCsc):
 
         self.model = Model(self.log)
 
-        self._detailed_state = DetailedState.IDLE
+        self._detailed_state = np.uint8(DetailedState.IDLE)
 
         # how long to wait for the loops to die? = 5 heartbeats
-        self.loop_die_timeout = 5.0 * base_csc.HEARTBEAT_INTERVAL
+        self.loop_die_timeout = 5.0 * self.heartbeat_interval
         # regular timeout for commands to remotes = 60 heartbeats (!?)
-        self.cmd_timeout = 60.0 * base_csc.HEARTBEAT_INTERVAL
+        self.cmd_timeout = 60.0 * self.heartbeat_interval
 
         # fast timeout
-        self.fast_timeout = 5.0 * base_csc.HEARTBEAT_INTERVAL
+        self.fast_timeout = 5.0 * self.heartbeat_interval
 
         # time it takes to finish start command
         self.start_timeout = 10 * self.fast_timeout
 
         # Declare contents related to the asyncio lock
         self.correction_loop_lock = asyncio.Lock()
-        self.correction_loop_task = None
+        self.correction_loop_task = utils.make_done_future()
+
         # Create an Event object that will get set after each
         # loop iteration
         self.correction_loop_completed_evt = asyncio.Event()
-        # create a task to lower the mirrors that can be run
-        # as a background event when going to fault state
-        self.lower_mirrors_task = make_done_future()
 
         # Time between corrections
-        self.correction_loop_time = base_csc.HEARTBEAT_INTERVAL
+        self.correction_loop_time = self.heartbeat_interval
 
         self.camera_exposing = False  # flag to monitor if camera is exposing
 
@@ -201,13 +205,13 @@ class ATAOS(ConfigurableCsc):
         self.pneumatics.tel_m2AirPressure.callback = self.m2_pressure_monitor_callback
 
         self.correction_tolerance = {
-            "m1": None,
-            "m2": None,
-            "x": None,
-            "y": None,
-            "z": None,
-            "u": None,
-            "v": None,
+            "m1": 0.0,
+            "m2": 0.0,
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "u": 0.0,
+            "v": 0.0,
         }
 
         # Note that focus is not part of corrections routines, focus correction
@@ -217,7 +221,10 @@ class ATAOS(ConfigurableCsc):
         # Correction for the atspectrograph setup is only performed when an
         # event is received from ATSpectrograph saying the filter and/or
         # grating has changed.
-        self.corrections_routines = {
+
+        self.corrections_routines: typing.Dict[
+            str, typing.Callable[[float, float], typing.Awaitable[None]]
+        ] = {
             "m1": self.set_pressure_m1,
             "m2": self.set_pressure_m2,
             "hexapod": self.set_hexapod,
@@ -232,49 +239,49 @@ class ATAOS(ConfigurableCsc):
     # used to call each remote is the same
     # note that all remotes in the atcs are lowercase
     @property
-    def pneumatics(self):
+    def pneumatics(self) -> Remote:
         return self.atcs.rem.atpneumatics
 
     @property
-    def mcs(self):
+    def mcs(self) -> Remote:
         return self.atcs.rem.atmcs
 
     @property
-    def hexapod(self):
+    def hexapod(self) -> Remote:
         return self.atcs.rem.athexapod
 
     # create properties for azimuth/elevation aspects so that callbacks are
     # not required. These callbacks cause issues inside the ATCS class
     @property
-    def azimuth(self):
+    def azimuth(self) -> typing.Optional[float]:
         if self.atcs.telescope_position is None:
             return None
         else:
             return self.atcs.telescope_position.azimuthCalculatedAngle[-1]
 
     @property
-    def elevation(self):
+    def elevation(self) -> typing.Optional[float]:
         if self.atcs.telescope_position is None:
             return None
         else:
             return self.atcs.telescope_position.elevationCalculatedAngle[-1]
 
     @property
-    def target_azimuth(self):
+    def target_azimuth(self) -> typing.Optional[float]:
         if self.atcs.telescope_target is None:
             return None
         else:
             return self.atcs.telescope_target.azimuth
 
     @property
-    def target_elevation(self):
+    def target_elevation(self) -> typing.Optional[float]:
         if self.atcs.telescope_target is None:
             return None
         else:
             return self.atcs.telescope_target.elevation
 
     @property
-    def detailed_state(self):
+    def detailed_state(self) -> np.uint8:
         """Return the current value for detailed state.
 
         Returns
@@ -284,26 +291,39 @@ class ATAOS(ConfigurableCsc):
         """
         return np.uint8(self._detailed_state)
 
-    @detailed_state.setter
-    def detailed_state(self, value):
+    @property
+    def enable_correction_timeout(self) -> float:
+        """Timeout for enableCorrection command, based on the number of
+        commands sent and events waited.
+        """
+        return self.cmd_timeout * 6
+
+    @property
+    def apply_correction_timeout(self) -> float:
+        """Timeout for applyCorrection command, based on the number of
+        commands sent and events waited.
+        """
+        return self.cmd_timeout
+
+    async def set_detailed_state(self, detailed_state: np.uint8) -> None:
         """Set and publish current value for detailed state.
 
         Parameters
         ----------
-        value : `int`
+        detailed_state : `int`
             New detailed state. Will be converted to np.uint8
         """
-        self._detailed_state = np.uint8(value)
-        self.evt_detailedState.set_put(substate=self._detailed_state)
+        self._detailed_state = np.uint8(detailed_state)
+        await self.evt_detailedState.set_write(substate=self._detailed_state)
 
     @property
-    def move_while_exposing(self):
+    def move_while_exposing(self) -> bool:
         """Property to map the value of an attribute to the event topic."""
         # bool(self.evt_correctionEnabled.data.moveWhileExposing)
         return bool(self._move_while_exposing)
 
     @move_while_exposing.setter
-    def move_while_exposing(self, value):
+    def move_while_exposing(self, value: bool) -> None:
         """Set value of attribute directly to the event topic."""
         # FIXME: For some reason setting and getting straight out of the
         # topic was not working I'll leave this as a placeholder here and
@@ -311,7 +331,7 @@ class ATAOS(ConfigurableCsc):
         # self.evt_correctionEnabled.set(moveWhileExposing=bool(value))
         self._move_while_exposing = bool(value)
 
-    async def begin_start(self, data):
+    async def begin_start(self, data: type_hints.BaseMsgType) -> None:
         """Begin do_start; called before state changes.
 
         Get state information from ATPneumatics and set callbacks to monitor
@@ -319,20 +339,12 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        data : `DataType`
+        data : `cmd_start.DataType`
             Command data
 
         """
-        self.log.debug("At beginning of begin_start")
-        if len(data.settingsToApply) == 0:
-            raise RuntimeError(
-                "No settings provided. ATAOS does not support default configuration. "
-                "You must provide a label or configuration file when starting. "
-                f"Currently available labels are: {self.evt_settingVersions.data.recommendedSettingsLabels}."
-            )
+        await self.cmd_start.ack_in_progress(data, timeout=self.start_timeout)
 
-        # Send in progressh ack with estimate of how long it takes to execute.
-        self.cmd_start.ack_in_progress(data, timeout=self.start_timeout)
         # Populate summary states and create callbacks (unless they
         # have already been created)
         if (
@@ -349,7 +361,9 @@ class ATAOS(ConfigurableCsc):
                 self.log.warning("Could not get summary state from ATPneumatics.")
 
             # set callback to monitor summary state from now on...
-            self.pneumatics.evt_summaryState.callback = self.pneumatics_ss_callback
+            self.pneumatics.evt_summaryState.callback = (
+                self.pneumatics_summary_state_callback
+            )
 
         if (
             self.pneumatics_main_valve_state is None
@@ -365,7 +379,9 @@ class ATAOS(ConfigurableCsc):
                 self.log.warning("Could not get main valve state from ATPneumatics.")
 
             # set callback to monitor main valve state from now on...
-            self.pneumatics.evt_mainValveState.callback = self.pneumatics_mvs_callback
+            self.pneumatics.evt_mainValveState.callback = (
+                self.pneumatics_main_valve_state_callback
+            )
 
         if (
             self.pneumatics_instrument_valve_state is None
@@ -383,7 +399,9 @@ class ATAOS(ConfigurableCsc):
                 )
 
             # set callback to monitor instrument valve state from now on...
-            self.pneumatics.evt_instrumentState.callback = self.pneumatics_iv_callback
+            self.pneumatics.evt_instrumentState.callback = (
+                self.pneumatics_instrument_state_callback
+            )
 
         if (
             self.pneumatics_m1_state is None
@@ -397,7 +415,7 @@ class ATAOS(ConfigurableCsc):
                 self.log.warning("Could not get m1 valve state from ATPneumatics.")
 
             # set callback to monitor m1 valve state from now on...
-            self.pneumatics.evt_m1State.callback = self.pneumatics_m1s_callback
+            self.pneumatics.evt_m1State.callback = self.pneumatics_m1_state_callback
 
         if (
             self.pneumatics_m2_state is None
@@ -411,7 +429,7 @@ class ATAOS(ConfigurableCsc):
                 self.log.warning("Could not get m2 valve state from ATPneumatics.")
 
             # set callback to monitor m2 valve state from now on...
-            self.pneumatics.evt_m2State.callback = self.pneumatics_m2s_callback
+            self.pneumatics.evt_m2State.callback = self.pneumatics_m2_state_callback
 
         # Instantiate the filter/disperser variables as they get
         # called below
@@ -434,7 +452,7 @@ class ATAOS(ConfigurableCsc):
 
             # Set callback for ATSpectrograph summary_state
             self.atspectrograph.evt_summaryState.callback = (
-                self.atspectrograph_ss_callback
+                self.atspectrograph_summary_state_callback
             )
 
             try:
@@ -506,7 +524,7 @@ class ATAOS(ConfigurableCsc):
         await super().begin_start(data)
         self.log.debug("Completed begin_start")
 
-    async def end_enable(self, id_data):
+    async def end_enable(self, data: type_hints.BaseMsgType) -> None:
         """End do_enable; called after state changes but before command
         acknowledged.
 
@@ -516,14 +534,16 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        id_data : `CommandIdData`
-            Command ID and data
+        id_data : ``cmd_enable.DataType``
+            Command data
         """
 
         # sets offsets to what they are in the init file, plus any
         # filter/disperser offsets set in begin_start
-        self.evt_correctionOffsets.set_put(**self.model.offset, force_output=True)
-        self.evt_focusOffsetSummary.set_put(
+        await self.evt_correctionOffsets.set_write(
+            **self.model.offset, force_output=True
+        )
+        await self.evt_focusOffsetSummary.set_write(
             **self.focus_offset_per_category, force_output=True
         )
 
@@ -534,7 +554,7 @@ class ATAOS(ConfigurableCsc):
             "the corrections enabled"
         )
 
-    async def end_disable(self, id_data):
+    async def end_disable(self, data: type_hints.BaseMsgType) -> None:
         """End do_disable; called after state changes but before command
         acknowledged.
 
@@ -542,8 +562,8 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        id_data : `CommandIdData`
-            Command ID and data
+        data : ``cmd_disable.DataType``
+            Command data
 
         """
 
@@ -579,10 +599,10 @@ class ATAOS(ConfigurableCsc):
         else:
             self.log.debug("Both M1 and M2 corrections disabled. Not lowering mirrors.")
 
-        self.detailed_state = 0
+        await self.set_detailed_state(np.uint8(0))
         self.log.debug("At end of end_disable")
 
-    async def do_applyCorrection(self, id_data):
+    async def do_applyCorrection(self, data: type_hints.BaseMsgType) -> None:
         """Apply a one-time correction based on model (LUTs) on all components
         either for the current position of the telescope (default) or the
         specified position.
@@ -602,8 +622,8 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        id_data : `CommandIdData`
-            Command ID and data
+        data : ``cmd_applyCorrection.DataType``
+            Command data
 
         Raises
         ------
@@ -617,11 +637,16 @@ class ATAOS(ConfigurableCsc):
 
         self.assert_enabled("applyCorrection")
         self.assert_corrections(enabled=False)
+
+        await self.cmd_applyCorrection.ack_in_progress(
+            data,
+            timeout=self.apply_correction_timeout,
+        )
+
         self.log.debug("Beginning do_applyCorrection")
 
-        # FIXME: Get position from telescope if elevation = 0.
-        azimuth = id_data.azimuth % 360.0
-        elevation = id_data.elevation
+        azimuth = data.azimuth % 360.0
+        elevation = data.elevation
 
         if elevation == 0.0:
             if self.azimuth is None or self.elevation is None:
@@ -648,16 +673,7 @@ class ATAOS(ConfigurableCsc):
         self.log.debug("Apply corrections from spectrograph")
         await self.set_atspectrograph_corrections(azimuth, elevation)
 
-        # FIXME: THIS is not working with the current version of the software
-        # need to see what is the problem. 2019/June/04
-        # run corrections concurrently
-        # await asyncio.gather(self.set_hexapod(azimuth, elevation),
-        #                      self.set_pressure("m1", azimuth, elevation),
-        #                      self.set_pressure("m2", azimuth, elevation),
-        #                      )  # FIXME: What about focus?
-        #                           YES, do focus separately
-
-    async def do_applyFocusOffset(self, id_data):
+    async def do_applyFocusOffset(self, data: type_hints.BaseMsgType) -> None:
         """Applies a relative focus offset to the hexapod position
         correction model. This is a cumulative offset.
         The movement of the mirror is performed by the loop, not
@@ -667,8 +683,8 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        id_data : `CommandIdData`
-            Command ID and data
+        data : ``cmd_applyFocusOffset.DataType``
+            Command data
 
         Raises
         ------
@@ -704,10 +720,10 @@ class ATAOS(ConfigurableCsc):
             # Clear the last correction_loop_completed event
             self.correction_loop_completed_evt.clear()
 
-            self.model.add_offset("z", id_data.offset)
+            self.model.add_offset("z", data.offset)
 
-            self.focus_offset_per_category["total"] += id_data.offset
-            self.focus_offset_per_category["userApplied"] += id_data.offset
+            self.focus_offset_per_category["total"] += data.offset
+            self.focus_offset_per_category["userApplied"] += data.offset
 
         # Lock now released, wait for correction to be applied.
         try:
@@ -722,12 +738,14 @@ class ATAOS(ConfigurableCsc):
             )
 
         # Publish new offset values
-        self.evt_correctionOffsets.set_put(**self.model.offset, force_output=True)
-        self.evt_focusOffsetSummary.set_put(
+        await self.evt_correctionOffsets.set_write(
+            **self.model.offset, force_output=True
+        )
+        self.evt_focusOffsetSummary.set_write(
             **self.focus_offset_per_category, force_output=True
         )
 
-    async def do_setCorrectionModelOffsets(self, id_data):
+    async def do_setCorrectionModelOffsets(self, data: type_hints.BaseMsgType) -> None:
         """Sets offset to selected model axis correction. These are *NOT* a
         cumulative offsets and will reset whatever values are currently
         entered. Use with caution.
@@ -739,8 +757,8 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        id_data : `CommandIdData`
-            Command ID and data
+        data : ``cmd_setCorrectionModelOffsets.DataType``
+            Command data
 
         Raises
         ------
@@ -761,7 +779,7 @@ class ATAOS(ConfigurableCsc):
         # the corrections are being applied
         async with self.correction_loop_lock:
 
-            self.model.set_offset(id_data.axis, id_data.offset)
+            self.model.set_offset(data.axis, data.offset)
 
             # Wait for correction to be applied.
             try:
@@ -775,19 +793,21 @@ class ATAOS(ConfigurableCsc):
                     "setCorrectionModelOffsets command"
                 )
 
-        self.evt_correctionOffsets.set_put(**self.model.offset, force_output=True)
+        await self.evt_correctionOffsets.set_write(
+            **self.model.offset, force_output=True
+        )
         # reset all offsets to zero
-        if id_data.axis == "z":
-            self.focus_offset_per_category["total"] = id_data.offset
-            self.focus_offset_per_category["userApplied"] = id_data.offset
+        if data.axis == "z":
+            self.focus_offset_per_category["total"] = data.offset
+            self.focus_offset_per_category["userApplied"] = data.offset
             self.focus_offset_per_category["filter"] = 0.0
             self.focus_offset_per_category["disperser"] = 0.0
             self.focus_offset_per_category["wavelength"] = 0.0
-            self.evt_focusOffsetSummary.set_put(
+            await self.evt_focusOffsetSummary.set_write(
                 **self.focus_offset_per_category, force_output=True
             )
 
-    async def do_offset(self, data):
+    async def do_offset(self, data: type_hints.BaseMsgType) -> None:
         """Apply relative offsets to any axis of the model (m1, m2, and
         hexapod x,y,z,u,v).
 
@@ -799,8 +819,8 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        data : `object`
-            Contains offsets for each hexapod axis
+        data : ``cmd_offset.DataType``
+            Command data
 
         Raises
         ------
@@ -858,18 +878,20 @@ class ATAOS(ConfigurableCsc):
             )
 
         self.log.debug("sending evt_correctionOffsets")
-        self.evt_correctionOffsets.set_put(**self.model.offset, force_output=True)
+        await self.evt_correctionOffsets.set_write(
+            **self.model.offset, force_output=True
+        )
 
         # Only sending the focusOffsetSummary event if a focus affecting
         # (z-axis) offset is applied (not equal to zero)
         if abs(getattr(data, "z")) > 1e-12:
             self.focus_offset_per_category["total"] += getattr(data, "z")
             self.focus_offset_per_category["userApplied"] += getattr(data, "z")
-            self.evt_focusOffsetSummary.set_put(
+            await self.evt_focusOffsetSummary.set_write(
                 **self.focus_offset_per_category, force_output=True
             )
 
-    async def do_resetOffset(self, data):
+    async def do_resetOffset(self, data: type_hints.BaseMsgType) -> None:
         """Reset userApplied provided offsets on a specific axis or all.
         Grating/Filter focus and pointing offsets will remain.
 
@@ -877,8 +899,8 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        data : `object`
-            Contains axis to be reset
+        data : ``cmd_resetOffset.DataType``
+            Command data
 
         Raises
         ------
@@ -970,12 +992,14 @@ class ATAOS(ConfigurableCsc):
             )
 
         # Publish events
-        self.evt_focusOffsetSummary.set_put(
+        await self.evt_focusOffsetSummary.set_write(
             **self.focus_offset_per_category, force_output=True
         )
-        self.evt_correctionOffsets.set_put(**self.model.offset, force_output=True)
+        await self.evt_correctionOffsets.set_write(
+            **self.model.offset, force_output=True
+        )
 
-    async def do_enableCorrection(self, id_data):
+    async def do_enableCorrection(self, data: type_hints.BaseMsgType) -> None:
         """Enable corrections on specified axes.
 
         This method only works for enabling corrections, it will not disable
@@ -989,8 +1013,8 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        id_data : `CommandIdData`
-            Command ID and data.
+        data : ``cmd_enableCorrection.DataType``
+            Command data.
 
         Raises
         ------
@@ -1001,56 +1025,61 @@ class ATAOS(ConfigurableCsc):
             from this method.
         """
         self.assert_enabled("enableCorrection")
-        self.assert_any_corrections(id_data)
+        self.assert_any_corrections(data)
 
-        # give control back to event loop such that other operations can be
-        # performed while this function is running
-        await asyncio.sleep(0.0)
+        await self.cmd_enableCorrection.ack_in_progress(
+            data,
+            timeout=self.enable_correction_timeout,
+        )
+
+        self.log.debug("Enabling corrections.")
 
         try:
-            if id_data.m1 or id_data.enableAll:
+            if data.m1 or data.enableAll:
+                self.log.debug("Preparing M1.")
                 await self.check_atpneumatic()
                 try:
                     if self.pneumatics_m1_state != ATPneumatics.AirValveState.OPENED:
+                        self.log.debug("Opening m1 air valve.")
                         await self.pneumatics.cmd_m1OpenAirValve.start(
                             timeout=self.cmd_timeout
                         )
-                except AckError as e:
-                    if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
-                        self.log.warning("M1 valve is already opened.")
-                        self.log.exception(e)
+                except AckError as ack_error:
+                    if ack_error.ackcmd.ack == SalRetCode.CMD_NOPERM:
+                        self.log.exception("M1 valve is already opened.")
                     else:
-                        raise e
+                        RuntimeError("Failed to open m1 air valve.")
 
                 # FIXME: ATPneumatics is not ready to set pressure just after
                 # the valve is opened and there is currently no event to
-                # indicate readiness. I'll wait 1 second after command
+                # indicate readiness. Wait 1 heartbeat internal after command
                 # finishes. Once this is fixed the sleep can be removed.
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(self.heartbeat_interval)
 
                 # Set pressure to zero.
                 await self.pneumatics.cmd_m1SetPressure.set_start(
                     pressure=0.0, timeout=self.cmd_timeout
                 )
 
+                self.log.debug("M1 ready.")
         except Exception as e:
             self.log.exception("Failed to open m1 air valve.")
             raise e
 
         try:
-            if id_data.m2 or id_data.enableAll:
+            if data.m2 or data.enableAll:
+                self.log.debug("Preparing M2.")
                 await self.check_atpneumatic()
                 try:
                     if self.pneumatics_m2_state != ATPneumatics.AirValveState.OPENED:
                         await self.pneumatics.cmd_m2OpenAirValve.start(
                             timeout=self.cmd_timeout
                         )
-                except AckError as e:
-                    if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
-                        self.log.warning("M2 valve is already opened.")
-                        self.log.exception(e)
+                except AckError as ack_error:
+                    if ack_error.ackcmd.ack == SalRetCode.CMD_NOPERM:
+                        self.log.exception("M2 valve is already opened.")
                     else:
-                        raise e
+                        raise ack_error
 
                 # set the pressure to zero before opening the valve so no
                 # large pressure spikes occur can't set it before opening
@@ -1058,16 +1087,16 @@ class ATAOS(ConfigurableCsc):
                 await self.pneumatics.cmd_m2SetPressure.set_start(
                     pressure=0.0, timeout=self.cmd_timeout
                 )
+                self.log.debug("M2 ready.")
         except Exception as e:
             self.log.exception("Failed to open m2 air valve.")
             raise e
 
         # make sure the spectrograph is still online and enabled
-        if id_data.atspectrograph or id_data.enableAll:
+        if data.atspectrograph or data.enableAll:
             await self.check_atspectrograph()
 
-        self.mark_corrections(id_data, True)
-        await asyncio.sleep(0.0)  # give control back to event loop
+        self.mark_corrections(data, True)
 
         # Perform one correction loop before handing back
         # Wait for correction to be applied - should be fast unless large
@@ -1084,9 +1113,9 @@ class ATAOS(ConfigurableCsc):
                 "to complete during enableCorrection"
             )
 
-        self.publish_enable_corrections()
+        await self.publish_enable_corrections()
 
-    async def do_disableCorrection(self, id_data):
+    async def do_disableCorrection(self, data: type_hints.BaseMsgType) -> None:
         """Disable corrections on specified axis.
 
         This is the mirror method of `enable_correction`, and will only
@@ -1094,31 +1123,30 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        id_data : `CommandIdData`
-            Command ID and data
-
+        data : ``cmd_disableCorrection.DataType``
+            Command data
         """
         self.assert_enabled("disableCorrection")
-        self.assert_any_corrections(id_data)
+        self.assert_any_corrections(data)
 
         # give control back to event loop such that other operations can
         # be performed while this function is running
         await asyncio.sleep(0.0)
 
-        self.mark_corrections(id_data, False)
+        self.mark_corrections(data, False)
         await asyncio.sleep(0.0)  # give control back to event loop
 
         # Lower mirrors if appropriate
-        if id_data == "disableAll":
+        if data == "disableAll":
             await self.lower_mirrors_to_hardpoints(m1=True, m2=True)
-        elif id_data == "m1":
+        elif data == "m1":
             await self.lower_mirrors_to_hardpoints(m1=True, m2=False)
-        elif id_data == "m2":
+        elif data == "m2":
             await self.lower_mirrors_to_hardpoints(m1=False, m2=True)
 
-        self.publish_enable_corrections()
+        await self.publish_enable_corrections()
 
-    async def do_setWavelength(self, id_data):
+    async def do_setWavelength(self, data: type_hints.BaseMsgType) -> None:
         """Set wavelength to optimize focus when being used with the
         LATISS spectrograph. This must only be used
         when the spectrograph is being used (glass optics are in the beam).
@@ -1136,8 +1164,8 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        id_data : `CommandIdData`
-            Command ID and data
+        id_data : ``cmd_setWavelength.DataType``
+            Command data
 
         Raises
         ------
@@ -1189,7 +1217,7 @@ class ATAOS(ConfigurableCsc):
 
             # must subtract whatever chromatic offset might already be in place
             _chromatic_offset = (
-                self.model.get_correction_chromatic(id_data.wavelength)
+                self.model.get_correction_chromatic(data.wavelength)
                 - self.focus_offset_per_category["wavelength"]
             )
 
@@ -1219,31 +1247,26 @@ class ATAOS(ConfigurableCsc):
             )
 
         # Publish event summarizing the offsets
-        self.evt_focusOffsetSummary.set_put(
+        await self.evt_focusOffsetSummary.set_write(
             **self.focus_offset_per_category, force_output=True
         )
-        self.evt_correctionOffsets.set_put(**self.model.offset, force_output=True)
+        await self.evt_correctionOffsets.set_write(
+            **self.model.offset, force_output=True
+        )
 
-    # TODO: This requires implementation
-    async def health_monitor(self):
-        """Monitor general health of component. Transition publish `errorCode`
-        and transition to FAULT state if anything bad happens.
-        """
-        # while True:
-        #     asyncio.sleep(base_csc.HEARTBEAT_INTERVAL)
-        pass
-
-    async def correction_loop(self):
+    async def correction_loop(self) -> None:
         """Coroutine to send corrections to m1, m2, hexapod and focus at
         the heartbeat frequency."""
-
-        # Grab the asyncio lock so no offsets can be added while
-        # the corrections are being applied
 
         while self.summary_state == State.ENABLED:
             # Create a sleep task that will help keep the loop frequency
             # near the target by running concurrently with the loop
-            sleep_task = asyncio.create_task(asyncio.sleep(self.correction_loop_time))
+            sleep_task: typing.Awaitable = asyncio.create_task(
+                asyncio.sleep(self.correction_loop_time)
+            )
+
+            # Grab the asyncio lock so no offsets can be added while
+            # the corrections are being applied
             async with self.correction_loop_lock:
 
                 try:
@@ -1283,16 +1306,9 @@ class ATAOS(ConfigurableCsc):
                         # to changes in atspectrograph filter/disperser
                         # changes, then apply if needed
                         self.log.debug(
-                            "self.corrections['atspectrograph'] "
-                            f"is {self.corrections['atspectrograph']}"
-                        )
-                        self.log.debug(
-                            "self.focus_offset_yet_to_be_applied "
-                            f"is {self.focus_offset_yet_to_be_applied}"
-                        )
-                        self.log.debug(
-                            "self.pointing_offsets_yet_to_be_applied "
-                            f"is {self.pointing_offsets_yet_to_be_applied}"
+                            f"atspectrograph: {self.corrections['atspectrograph']}, "
+                            f"focus_offset_yet_to_be_applied: {self.focus_offset_yet_to_be_applied}, "
+                            f"pointing_offsets_yet_to_be_applied: {self.pointing_offsets_yet_to_be_applied}"
                         )
 
                     else:
@@ -1325,7 +1341,7 @@ class ATAOS(ConfigurableCsc):
                     self.log.exception(
                         "Error in correction loop. Going to FAULT state."
                     )
-                    self.fault(
+                    await self.fault(
                         code=CORRECTION_LOOP_DIED,
                         report="Correction loop died.",
                         traceback=traceback.format_exc(),
@@ -1340,7 +1356,9 @@ class ATAOS(ConfigurableCsc):
             # starting the next iteration
             await sleep_task
 
-    async def lower_mirrors_to_hardpoints(self, m1=True, m2=True):
+    async def lower_mirrors_to_hardpoints(
+        self, m1: bool = True, m2: bool = True
+    ) -> None:
         """Lower mirrors on to hardpoints by setting pneumatic pressures
         to zero. This is to be called whenever safety of the mirror, or
         lifting of the mirror from the hardpoints (completely) may be a
@@ -1356,7 +1374,6 @@ class ATAOS(ConfigurableCsc):
 
         m2 : `boolean`
             Lower secondary (m2) mirror
-
         """
 
         # Try statements required to handle case when ATPneumatics is
@@ -1389,15 +1406,15 @@ class ATAOS(ConfigurableCsc):
                 "Failed to set m1 presssure to zero and/or close m2 air valve."
             )
 
-    def assert_any_corrections(self, data):
+    def assert_any_corrections(self, data: type_hints.BaseMsgType) -> None:
         """Check that at least one attribute of
-        ATAOS_command_disableCorrectionC or
-        ATAOS.ATAOS_command_enableCorrectionC are set to True.
+        disableCorrection or enableCorrection are set to True.
 
         Parameters
         ----------
-        data : ATAOS_command_disableCorrectionC or
-               ATAOS_command_enableCorrectionC
+        data : ``cmd_disableCorrection.DataType`` or
+               ``cmd_enableCorrection.DataType``
+            Command data
 
         Raises
         ------
@@ -1409,7 +1426,7 @@ class ATAOS(ConfigurableCsc):
             [getattr(data, corr, False) for corr in self.valid_corrections]
         ), "At least one correction must be set."
 
-    def assert_corrections(self, enabled):
+    def assert_corrections(self, enabled: bool) -> None:
         """Check that the corrections are either enabled or disabled.
 
         Parameters
@@ -1436,7 +1453,7 @@ class ATAOS(ConfigurableCsc):
                 self.corrections.items(),
             )
 
-    def can_move(self):
+    def can_move(self) -> bool:
         """Check that it is ok to move the hexapod.
 
         If `self.move_while_exposing = False` the method will check that
@@ -1450,7 +1467,6 @@ class ATAOS(ConfigurableCsc):
         -------
         can_move : bool
             True if it is ok to move the hexapod, False otherwise.
-
         """
         if self.move_while_exposing:  # The easy case
             return True
@@ -1459,14 +1475,16 @@ class ATAOS(ConfigurableCsc):
         else:
             return True
 
-    def mark_corrections(self, data, flag):
+    def mark_corrections(self, data: type_hints.BaseMsgType, flag: bool) -> None:
         """Utility method to switch corrections on/off.
 
         Parameters
         ----------
-        data : ATAOS_command_disableCorrectionC or
-               ATAOS_command_enableCorrectionC
+        data : ``cmd_disableCorrection.DataType`` or
+               ``cmd_enableCorrection.DataType``
+            Command data
         flag : bool
+            Value to set the corrections to
         """
         if data.moveWhileExposing:
             self.move_while_exposing = flag
@@ -1492,31 +1510,33 @@ class ATAOS(ConfigurableCsc):
             if getattr(data, key):
                 self.corrections[key] = flag
 
-    def publish_enable_corrections(self):
+    async def publish_enable_corrections(self) -> None:
         """Utility function to publish enable corrections."""
         kwargs = dict((key, value) for key, value in self.corrections.items())
-        self.evt_correctionEnabled.set_put(
+        await self.evt_correctionEnabled.set_write(
             moveWhileExposing=self.move_while_exposing, **kwargs
         )
 
-    def shutter_monitor_callback(self, data):
+    def shutter_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """A callback function to monitor the camera shutter.
 
         Parameters
         ----------
-        data : `ATCamera.ATCamera_logevent_shutterDetailedStateC`
-            Command ID and data
+        data : `ATCamera_logevent_shutterDetailedState`
+            Sample of shutterDetailedState event from ATCamera
         """
         self.camera_exposing = data.substate != ShutterState.CLOSED
 
-    def atspectrograph_filter_monitor_callback(self, data):
+    def atspectrograph_filter_monitor_callback(
+        self, data: type_hints.BaseMsgType
+    ) -> None:
         """A callback function to monitor the atspectrograph filter/grating
         changes.
 
         Parameters
         ----------
-        data : `ATSpectrograph.ATSpectrograph_logevent_reportedFilterPosition`
-            Command ID and data
+        data : `ATSpectrograph_logevent_reportedFilterPosition`
+            Sample of reportedFilterPosition event from ATSpectrograph
         """
         # Do not want to apply any corrections here.
         # Method is to track the corrections to be applied, even if the
@@ -1565,15 +1585,16 @@ class ATAOS(ConfigurableCsc):
         self.pointing_offsets_per_category["filter"] = np.array(data.pointingOffsets)
         self.pointing_offsets_yet_to_be_applied += _pointing_offsets_to_apply
 
-    def atspectrograph_disperser_monitor_callback(self, data):
+    def atspectrograph_disperser_monitor_callback(
+        self, data: type_hints.BaseMsgType
+    ) -> None:
         """A callback function to monitor the atspectrograph filter/grating
         changes.
 
         Parameters
         ----------
-        data :
-        `ATSpectrograph.ATSpectrograph_logevent_reportedDisperserPosition`
-            Command ID and data
+        data : `ATSpectrograph_logevent_reportedDisperserPosition`
+            Sampe of reportedDisperserPosition event from ATSpectrograph
         """
         self.log.info(
             "Caught ATSpectrograph disperser change, calculating correction offsets"
@@ -1610,14 +1631,13 @@ class ATAOS(ConfigurableCsc):
         self.pointing_offsets_per_category["disperser"] = np.array(data.pointingOffsets)
         self.pointing_offsets_yet_to_be_applied += _pointing_offsets_to_apply
 
-    def hexapod_monitor_callback(self, data):
+    def hexapod_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """A callback function to monitor position updates on the hexapod.
 
         Parameters
         ----------
-        data
-            Event data.
-
+        data : `ATHexapod_logevent_positionUpdate`
+            Sample positionUpdate event from ATHexapod
         """
         self.current_positions["x"] = data.positionX
         self.current_positions["y"] = data.positionY
@@ -1625,27 +1645,27 @@ class ATAOS(ConfigurableCsc):
         self.current_positions["u"] = data.positionU
         self.current_positions["v"] = data.positionV
 
-    def m1_pressure_monitor_callback(self, data):
+    def m1_pressure_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback function to monitor M1 pressure
 
         Parameters
         ----------
-        data
-
+        data : `ATPneumatics_m1AirPressure`
+            Sample m1AirPressure telemtry from  ATPneumatics
         """
         self.current_positions["m1"] = data.pressure
 
-    def m2_pressure_monitor_callback(self, data):
+    def m2_pressure_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback function to monitor M2 pressure
 
         Parameters
         ----------
-        data
-
+        data : `ATPneumatics_m2AirPressure`
+            Sample m2AirPressure telemtry from  ATPneumatics
         """
         self.current_positions["m2"] = data.pressure
 
-    async def set_pressure_m1(self, azimuth, elevation):
+    async def set_pressure_m1(self, azimuth: float, elevation: float) -> None:
         """Set pressure on m1.
 
         Parameters
@@ -1664,7 +1684,7 @@ class ATAOS(ConfigurableCsc):
             self.correction_tolerance["m1"],
         )
 
-    async def set_pressure_m2(self, azimuth, elevation):
+    async def set_pressure_m2(self, azimuth: float, elevation: float) -> None:
         """Set pressure on m2.
 
         Parameters
@@ -1684,19 +1704,34 @@ class ATAOS(ConfigurableCsc):
         )
 
     async def set_pressure(
-        self, mirror, azimuth, elevation, pressure, current=None, tolerance=None
-    ):
+        self,
+        mirror: str,
+        azimuth: float,
+        elevation: float,
+        pressure: float,
+        current: typing.Optional[float] = None,
+        tolerance: typing.Optional[float] = None,
+    ) -> None:
         """Set pressure on specified mirror.
+
+        If ``current`` and ``tolerance`` are set, pressure will only be set if
+        the difference between  ``pressure`` and ``current`` is larger than
+        ``tolerance``.
 
         Parameters
         ----------
         mirror : str
             Either m1 or m2
         azimuth : float
+            Azimuth position (deg)
         elevation : float
+            Elevation position (deg)
         pressure : float
+            Pressure (Pa)
         current : float
+            Current pressure (Pa)
         tolerance : float
+            Tolerance in pressure value (Pa)
         """
         status_bit = getattr(DetailedState, f"{mirror}".upper())
 
@@ -1717,44 +1752,44 @@ class ATAOS(ConfigurableCsc):
             return
         else:
             # publish new detailed state
-            self.detailed_state = self.detailed_state ^ status_bit
+            await self.set_detailed_state(self.detailed_state ^ status_bit)
 
             cmd_attr = getattr(self.pneumatics, f"cmd_{mirror}SetPressure")
             evt_start_attr = getattr(self, f"evt_{mirror}CorrectionStarted")
             evt_end_attr = getattr(self, f"evt_{mirror}CorrectionCompleted")
 
-            # give control back to event loop such that other operations can
-            # be performed while this function is running
-            await asyncio.sleep(0.0)
-
-            evt_start_attr.set_put(
+            await evt_start_attr.set_write(
                 azimuth=azimuth, elevation=elevation, pressure=pressure
             )
             try:
                 await cmd_attr.set_start(pressure=pressure, timeout=self.cmd_timeout)
             except Exception as e:
-                self.log.warning(
+                self.log.exception(
                     f"Failed to set pressure for {mirror} @ "
                     f"AzEl: {azimuth}/{elevation}"
                 )
-                self.log.exception(e)
                 raise e
             finally:
-                evt_end_attr.set_put(
+                await evt_end_attr.set_write(
                     azimuth=azimuth, elevation=elevation, pressure=pressure
                 )
                 # correction completed... flip bit on detailedState
-                self.detailed_state = self.detailed_state ^ status_bit
+                await self.set_detailed_state(self.detailed_state ^ status_bit)
 
-    async def set_hexapod(self, azimuth, elevation, axis="xyzuvw"):
+    async def set_hexapod(
+        self, azimuth: float, elevation: float, axis: str = "xyzuvw"
+    ) -> None:
         """Utility to calculate desired hexapod position based on models,
          then apply the movements.
 
         Parameters
         ----------
-        azimuth
-        elevation
-        axis
+        azimuth : float
+            Azimuth (deg)
+        elevation : float
+            Elevation (deg)
+        axis : string
+            Which axis to set position. Any subset of the string "xyzuvw".
         """
 
         if self.can_move():
@@ -1772,7 +1807,7 @@ class ATAOS(ConfigurableCsc):
                 evt_start_attr = getattr(self, "evt_focusCorrectionStarted")
                 evt_end_attr = getattr(self, "evt_focusCorrectionCompleted")
 
-            self.detailed_state = self.detailed_state ^ status_bit
+            await self.set_detailed_state(np.uint8(self.detailed_state ^ status_bit))
 
             hexapod = dict(
                 zip(
@@ -1822,7 +1857,7 @@ class ATAOS(ConfigurableCsc):
 
             evt_end_attr.set(elevation=elevation, azimuth=azimuth, **hexapod)
 
-            evt_start_attr.put()
+            await evt_start_attr.write()
 
             try:
                 await self.hexapod.cmd_moveToPosition.set_start(
@@ -1835,22 +1870,29 @@ class ATAOS(ConfigurableCsc):
                 self.log.exception(e)
                 raise e
             finally:
-                evt_end_attr.put()
+                await evt_end_attr.write()
                 # correction completed... flip bit on detailedState
-                self.detailed_state = self.detailed_state ^ status_bit
+                await self.set_detailed_state(
+                    np.uint8(self.detailed_state ^ status_bit)
+                )
 
-    async def set_atspectrograph_corrections(self, azimuth, elevation):
+    async def set_atspectrograph_corrections(
+        self, azimuth: float, elevation: float
+    ) -> None:
         """Utility to apply hexapod and/or pointing corrections based on
          the ATSpectrograph configuration. This gets called as part of
          the regular control loop.
 
         Parameters
         ----------
+        azimuth : float
+            Azimuth (deg)
+        elevation : float
+            Elevation (deg)
 
         Warning
         -------
-
-        Can only be applied if hexapod correction is also applied
+        Can only be applied if hexapod correction is also applied.
         """
         self.log.debug(
             f"At the beginning of set_atspectrograph_corrections with "
@@ -1918,7 +1960,7 @@ class ATAOS(ConfigurableCsc):
             # note that self.focus_offset_yet_to_be_applied is a value
             # not an object so no deepcopy is required
             if abs(self.focus_offset_yet_to_be_applied) > abs(
-                self.correction_tolerance["z"] / 10
+                self.correction_tolerance["z"] / 10.0
             ):
                 _offset_value = self.focus_offset_yet_to_be_applied
                 self.model.add_offset("z", _offset_value)
@@ -1933,11 +1975,12 @@ class ATAOS(ConfigurableCsc):
                 )
 
             # publish events with new offsets, even if unchanged
-            self.evt_correctionOffsets.set_put(**self.model.offset, force_output=True)
-            self.evt_focusOffsetSummary.set_put(
+            await self.evt_correctionOffsets.set_write(
+                **self.model.offset, force_output=True
+            )
+            await self.evt_focusOffsetSummary.set_write(
                 **self.focus_offset_per_category, force_output=True
             )
-            await asyncio.sleep(0)
 
             # Now do pointing
             if np.max(np.abs(self.pointing_offsets_yet_to_be_applied)) > abs(
@@ -1963,20 +2006,22 @@ class ATAOS(ConfigurableCsc):
             # the thresholds
 
             # Corrections required, so flip the bit on the detailed state
-            self.detailed_state = self.detailed_state ^ status_bit
+            await self.set_detailed_state(np.uint8(self.detailed_state ^ status_bit))
 
-            self.log.debug(f"_offset_value is {_offset_value}")
-            self.log.debug(f"_pointing_offsets is {_pointing_offsets!r}")
+            self.log.debug(
+                f"_offset_value: {_offset_value} "
+                f"_pointing_offsets: {_pointing_offsets!r}"
+            )
 
             # send out even saying correction is started
-            self.evt_atspectrographCorrectionStarted.set_put(
+            await self.evt_atspectrographCorrectionStarted.set_write(
                 focusOffset=_offset_value,
                 pointingOffsets=_pointing_offsets,
                 force_output=True,
             )
 
             # Apply focus correction if above tolerance
-            if abs(_offset_value):
+            if abs(_offset_value) > 0.0:
                 self.log.debug(
                     f"Applying focus correction {_offset_value}" " with hexapod"
                 )
@@ -2008,7 +2053,7 @@ class ATAOS(ConfigurableCsc):
                     f" {self.pointing_offsets_per_category['total']}"
                 )
             # Publish pointing summary
-            self.evt_pointingOffsetSummary.set_put(
+            await self.evt_pointingOffsetSummary.set_write(
                 total=self.pointing_offsets_per_category["total"],
                 filter=self.pointing_offsets_per_category["filter"],
                 disperser=self.pointing_offsets_per_category["disperser"],
@@ -2033,20 +2078,20 @@ class ATAOS(ConfigurableCsc):
             )
 
             # Publish Event saying corrections are completed
-            self.evt_atspectrographCorrectionCompleted.set_put(
+            await self.evt_atspectrographCorrectionCompleted.set_write(
                 focusOffset=_offset_value,
                 pointingOffsets=_pointing_offsets,
                 force_output=True,
             )
             # correction completed for this iteration,
             # flip bit on detailedState
-            self.detailed_state = self.detailed_state ^ status_bit
+            await self.set_detailed_state(np.uint8(self.detailed_state ^ status_bit))
 
     @staticmethod
-    def get_config_pkg():
+    def get_config_pkg() -> str:
         return "ts_config_attcs"
 
-    async def configure(self, config):
+    async def configure(self, config: typing.Any) -> None:
         """Implement method to configure the CSC.
 
         Parameters
@@ -2054,11 +2099,11 @@ class ATAOS(ConfigurableCsc):
         config : `object`
             The configuration as described by the schema at ``schema_path``,
             as a struct-like object.
+
         Notes
         -----
         Called when running the ``start`` command, just before changing
         summary state from `State.STANDBY` to `State.DISABLED`.
-
         """
 
         self.correction_loop_time = 1.0 / config.correction_frequency
@@ -2092,7 +2137,9 @@ class ATAOS(ConfigurableCsc):
         self.model.m2_lut_elevation_limits = config.m2_lut_elevation_limits
         self.model.hexapod_lut_elevation_limits = config.hexapod_lut_elevation_limits
 
-    def atspectrograph_ss_callback(self, data):
+    def atspectrograph_summary_state_callback(
+        self, data: type_hints.BaseMsgType
+    ) -> None:
         """Callback to monitor summary state from atspectrograph. If this
         arises, then the filter/grating offsets that were previously set
         need to be removed as the new filter/grating values will come
@@ -2101,14 +2148,14 @@ class ATAOS(ConfigurableCsc):
 
         Parameters
         ----------
-        data
-
+        data : `ATSPectrograph_logevent_summaryState`
+            Sample summaryState event from ATSpectrograph
         """
 
         self.atspectrograph_summary_state = State(data.summaryState)
         self.log.debug(
-            f"Caught a new atspectrograph summary state {self.atspectrograph_summary_state!r},"
-            " resetting filter/disperser offsets"
+            f"Caught a new atspectrograph summary state {self.atspectrograph_summary_state!r}, "
+            "resetting filter/disperser offsets"
         )
         # Add correction cycles so new corrections will be applied
         self.atspectrograph_corrections_required = 2  # one for focus, one for pointing
@@ -2136,8 +2183,14 @@ class ATAOS(ConfigurableCsc):
         ]
         self.pointing_offsets_per_category["disperser"] = np.array([0.0, 0.0])
 
-    async def check_atspectrograph(self):
-        """Check that the atspectrograph is online and enabled"""
+    async def check_atspectrograph(self) -> None:
+        """Check that the atspectrograph is online and enabled.
+
+        Raises
+        ------
+        RuntimeError
+            If ATSpectrograph is not in ENABLED state.
+        """
         if self.atspectrograph_summary_state != State.ENABLED:
             raise RuntimeError(
                 f"ATSpectrograph (LATISS) in {self.atspectrograph_summary_state}. "
@@ -2146,9 +2199,15 @@ class ATAOS(ConfigurableCsc):
                 f" corrections."
             )
 
-    async def check_atpneumatic(self):
-        """Check that the main and instrument valves on ATPneumatics are open.
-        Open if they are closed.
+    async def check_atpneumatic(self) -> None:
+        """Check that ATPneumatics is in ENABLED state and that the main and
+        instrument valves are open. If valves are closed try to open them.
+
+        Raises
+        ------
+        RuntimeError
+            If ATPneumatics is not in ENABLED state.
+            If fails to open main or instrument valves.
         """
 
         if self.pneumatics_summary_state != State.ENABLED:
@@ -2164,12 +2223,14 @@ class ATAOS(ConfigurableCsc):
                 await self.pneumatics.cmd_openMasterAirSupply.start(
                     timeout=self.cmd_timeout
                 )
-            except AckError as e:
-                if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
-                    self.log.warning("Master valve is already opened.")
-                    self.log.exception(e)
+            except AckError as ack_error:
+                if ack_error.ackcmd.ack == SalRetCode.CMD_NOPERM:
+                    self.log.exception("Master valve is already opened.")
                 else:
-                    raise e
+                    raise RuntimeError(
+                        "Failed to open ATPneumatics master air supply. "
+                        f"ack: {ack_error.ackcmd.ack} error: {ack_error.ackcmd.result}"
+                    )
 
         if self.pneumatics_instrument_valve_state != ATPneumatics.AirValveState.OPENED:
             self.log.debug(
@@ -2179,14 +2240,18 @@ class ATAOS(ConfigurableCsc):
                 await self.pneumatics.cmd_openInstrumentAirValve.start(
                     timeout=self.cmd_timeout
                 )
-            except AckError as e:
-                if e.ackcmd.ack == SalRetCode.CMD_NOPERM:
-                    self.log.warning("Instrument valve is already opened.")
-                    self.log.exception(e)
+            except AckError as ack_error:
+                if ack_error.ackcmd.ack == SalRetCode.CMD_NOPERM:
+                    self.log.exception("Instrument valve is already opened.")
                 else:
-                    raise e
+                    raise RuntimeError(
+                        "Failed to open ATPneumatics instrument valve. "
+                        f"ack: {ack_error.ackcmd.ack} error: {ack_error.ackcmd.result}"
+                    )
 
-    def fault(self, code=None, report="", traceback=""):
+    async def fault(
+        self, code: typing.Optional[int] = None, report: str = "", traceback: str = ""
+    ) -> None:
         """Enter the fault state.
 
         Subclass parent method to disable corrections in the wait to FAULT
@@ -2199,6 +2264,8 @@ class ATAOS(ConfigurableCsc):
             is not output and you should output it yourself.
         report : `str` (optional)
             Description of the error.
+        traceback : `str` (optional)
+            Error traceback string.
         """
 
         # Disable corrections
@@ -2206,73 +2273,69 @@ class ATAOS(ConfigurableCsc):
         disable_corr.disableAll = True
         self.mark_corrections(disable_corr, False)
 
-        # Now lower the mirrors if the corrections were enabled
-        # salobj doesn't support an asynchronous fault method
-        # so need to schedule a background task
-        if self.lower_mirrors_task.done():
-            self.lower_mirrors_task = asyncio.create_task(
-                self.lower_mirrors_to_hardpoints(
-                    m1=self.corrections["m1"], m2=self.corrections["m2"]
-                )
-            )
-        else:
-            self.log.info("Mirrors already being lowered. Skipping...")
+        await self.lower_mirrors_to_hardpoints(
+            m1=self.corrections["m1"], m2=self.corrections["m2"]
+        )
 
-        self.publish_enable_corrections()
+        await self.publish_enable_corrections()
 
-        super().fault(code=code, report=report, traceback=traceback)
+        await super().fault(code=code, report=report, traceback=traceback)
 
-    def pneumatics_ss_callback(self, data):
+    def pneumatics_summary_state_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback to monitor summary state from atpneumatics.
 
         Parameters
         ----------
-        data
-
+        data : `ATPneumatics_logevent_summaryState`
+            Sample summaryState event from ATPneumatics
         """
         self.pneumatics_summary_state = State(data.summaryState)
 
-    def pneumatics_mvs_callback(self, data):
+    def pneumatics_main_valve_state_callback(
+        self, data: type_hints.BaseMsgType
+    ) -> None:
         """Callback to monitor main valve state from atpneumatics.
 
         Parameters
         ----------
-        data
-
+        data : `ATPneumatics_logevent_mainValveState`
+            Sample mainValveState event from ATPneumatics
         """
         self.pneumatics_main_valve_state = ATPneumatics.AirValveState(data.state)
 
-    def pneumatics_iv_callback(self, data):
+    def pneumatics_instrument_state_callback(
+        self, data: type_hints.BaseMsgType
+    ) -> None:
         """Callback to monitor instrument valve state from atpneumatics.
 
         Parameters
         ----------
-        data
-
+        data : `ATPneumatics_logevent_instrumentState`
+            Sample instrumentState event from ATPneumatics
         """
         self.pneumatics_instrument_valve_state = ATPneumatics.AirValveState(data.state)
 
-    def pneumatics_m1s_callback(self, data):
+    def pneumatics_m1_state_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback to monitor m1 valve state from atpneumatics.
 
         Parameters
         ----------
-        data
-
+        data : `ATPneumatics_logevent_m1State`
+            Sample m1State event from ATPneumatics
         """
         self.pneumatics_m1_state = ATPneumatics.AirValveState(data.state)
 
-    def pneumatics_m2s_callback(self, data):
+    def pneumatics_m2_state_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback to monitor m2 valve state from atpneumatics.
 
         Parameters
         ----------
-        data
-
+        data : `ATPneumatics_logevent_m2State`
+            Sample m2State event from ATPneumatics
         """
         self.pneumatics_m2_state = ATPneumatics.AirValveState(data.state)
 
-    async def close(self):
+    async def close(self) -> None:
 
         await self.atcs.close()
         await super().close()
