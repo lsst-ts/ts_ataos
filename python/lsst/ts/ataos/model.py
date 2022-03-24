@@ -1,5 +1,6 @@
-import numpy as np
+import typing
 import logging
+import numpy as np
 
 __all__ = ["Model"]
 
@@ -14,7 +15,7 @@ class Model:
 
     """
 
-    def __init__(self, log):
+    def __init__(self, log: typing.Optional[logging.Logger]):
 
         # Create a logger if none were passed during the instantiation of
         # the class
@@ -74,7 +75,7 @@ class Model:
 
         self.m1_pressure_minimum = 0.0
 
-    def reset_offset(self):
+    def reset_offset(self) -> None:
         """Reset all offsets to zero."""
         self.offset = {
             "m1": 0.0,
@@ -86,7 +87,7 @@ class Model:
             "v": 0.0,
         }
 
-    def set_offset(self, axis, value):
+    def set_offset(self, axis: str, value: float) -> None:
         """Set offset for specified axis.
 
         Parameters
@@ -104,7 +105,7 @@ class Model:
                 f"Invalid axis name '{axis}'. Must be one of " f"{self.offset.keys()}."
             )
 
-    def add_offset(self, axis, value):
+    def add_offset(self, axis: str, value: float) -> None:
         """Set offset for specified axis.
 
         Parameters
@@ -122,7 +123,12 @@ class Model:
                 f"Invalid axis name '{axis}'. Must be one of " f"{self.offset.keys()}."
             )
 
-    def get_correction_m1(self, azimuth, elevation, temperature=None):
+    def get_correction_m1(
+        self,
+        azimuth: float,
+        elevation: float,
+        temperature: typing.Optional[float] = None,
+    ) -> float:
         """Correction for m1 support pressure.
 
         Parameters
@@ -165,7 +171,12 @@ class Model:
             else self.m1_pressure_minimum
         )
 
-    def get_correction_m2(self, azimuth, elevation, temperature=None):
+    def get_correction_m2(
+        self,
+        azimuth: float,
+        elevation: float,
+        temperature: typing.Optional[float] = None,
+    ) -> float:
         """Correction for m2 support pressure.
 
         Parameters
@@ -196,7 +207,12 @@ class Model:
             + self.offset["m2"]
         )
 
-    def get_correction_hexapod(self, azimuth, elevation, temperature=None):
+    def get_correction_hexapod(
+        self,
+        azimuth: float,
+        elevation: float,
+        temperature: typing.Optional[float] = None,
+    ) -> np.ndarray:
         """Correction for hexapod position.
 
         Parameters
@@ -210,18 +226,20 @@ class Model:
 
         Returns
         -------
-        x : float
-            x-axis position (um)
-        y : float
-            y-axis position (um)
-        z : float
-            z-axis position (um)
-        u : float
-            rotation angle with respect to x-axis (degrees)
-        v : float
-            rotation angle with respect to y-axis (degrees)
-        w : float
-            [DISABLED] rotation angle with respect to z-axis (degrees)
+        np.ndarray
+            Hexapod positions in the following order:
+                x : float
+                    x-axis position (um)
+                y : float
+                    y-axis position (um)
+                z : float
+                    z-axis position (um)
+                u : float
+                    rotation angle with respect to x-axis (degrees)
+                v : float
+                    rotation angle with respect to y-axis (degrees)
+                w : float
+                    [DISABLED] rotation angle with respect to z-axis (degrees)
         """
         lut_elevation = self.get_lut_elevation(
             elevation, self.hexapod_lut_elevation_limits
@@ -245,7 +263,7 @@ class Model:
 
         return np.matmul(_offset, self._hexapod_sensitivity_matrix)
 
-    def get_correction_chromatic(self, wavelength):
+    def get_correction_chromatic(self, wavelength: float) -> float:
         """Focus (via z-hexapod offset) correction for specified wavelength.
         Note that the central wavelength of the telescope without any
         filter is 700nm.
@@ -269,7 +287,9 @@ class Model:
 
         return _chromatic_focus_offset
 
-    def get_correction_m1_out_of_bound_factor(self, elevation, correction_m1_lut):
+    def get_correction_m1_out_of_bound_factor(
+        self, elevation: float, correction_m1_lut: float
+    ) -> float:
         """Return a correction factor for the m1 correction when the elevation
         is out of bounds.
 
@@ -300,83 +320,83 @@ class Model:
         )
 
     @property
-    def m1(self):
+    def m1(self) -> typing.List[float]:
         return self.config["m1"]
 
     @m1.setter
-    def m1(self, val):
+    def m1(self, val: typing.List[float]) -> None:
         self.config["m1"] = val
         self.poly_m1 = np.poly1d(val)
 
     @property
-    def m2(self):
+    def m2(self) -> typing.List[float]:
         return self.config["m2"]
 
     @m2.setter
-    def m2(self, val):
+    def m2(self, val: typing.List[float]) -> None:
         self.config["m2"] = val
         self.poly_m2 = np.poly1d(val)
 
     @property
-    def hexapod_x(self):
+    def hexapod_x(self) -> typing.List[float]:
         return self.config["hexapod_x"]
 
     @hexapod_x.setter
-    def hexapod_x(self, val):
+    def hexapod_x(self, val: typing.List[float]) -> None:
         self.config["hexapod_x"] = val
         self.poly_x = np.poly1d(val)
 
     @property
-    def hexapod_y(self):
+    def hexapod_y(self) -> typing.List[float]:
         return self.config["hexapod_y"]
 
     @hexapod_y.setter
-    def hexapod_y(self, val):
+    def hexapod_y(self, val: typing.List[float]) -> None:
         self.config["hexapod_y"] = val
         self.poly_y = np.poly1d(val)
 
     @property
-    def hexapod_z(self):
+    def hexapod_z(self) -> typing.List[float]:
         return self.config["hexapod_z"]
 
     @hexapod_z.setter
-    def hexapod_z(self, val):
+    def hexapod_z(self, val: typing.List[float]) -> None:
         self.config["hexapod_z"] = val
         self.poly_z = np.poly1d(val)
 
     @property
-    def hexapod_u(self):
+    def hexapod_u(self) -> typing.List[float]:
         return self.config["hexapod_u"]
 
     @hexapod_u.setter
-    def hexapod_u(self, val):
+    def hexapod_u(self, val: typing.List[float]) -> None:
         self.config["hexapod_u"] = val
         self.poly_u = np.poly1d(val)
 
     @property
-    def hexapod_v(self):
+    def hexapod_v(self) -> typing.List[float]:
         return self.config["hexapod_v"]
 
     @hexapod_v.setter
-    def hexapod_v(self, val):
+    def hexapod_v(self, val: typing.List[float]) -> None:
         self.config["hexapod_v"] = val
         self.poly_v = np.poly1d(val)
 
     @property
-    def chromatic_dependence(self):
+    def chromatic_dependence(self) -> typing.List[float]:
         return self.config["chromatic_dependence"]
 
     @chromatic_dependence.setter
-    def chromatic_dependence(self, val):
+    def chromatic_dependence(self, val: typing.List[float]) -> None:
         self.config["chromatic_dependence"] = val
         self.poly_chromatic = np.poly1d(val)
 
     @property
-    def hexapod_sensitivity_matrix(self):
+    def hexapod_sensitivity_matrix(self) -> np.ndarray:
         return self._hexapod_sensitivity_matrix.copy()
 
     @hexapod_sensitivity_matrix.setter
-    def hexapod_sensitivity_matrix(self, val):
+    def hexapod_sensitivity_matrix(self, val: np.ndarray) -> None:
 
         new_value = np.array(val, dtype=float)
 
@@ -389,7 +409,7 @@ class Model:
         self._hexapod_sensitivity_matrix = new_value.copy()
 
     @staticmethod
-    def get_lut_elevation(elevation, limits):
+    def get_lut_elevation(elevation: float, limits: typing.List[float]) -> float:
         """Return an elevation value inside the limits.
 
         Parameters

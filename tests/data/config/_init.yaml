@@ -1,0 +1,111 @@
+# Ticket used to create this file: DM-31379
+# Date created: 2021-08-17
+# Description: New M1 values derived from looking at when the mirror lifts.
+#   Details can be found in https://sitcomtn-015.lsst.io/
+#   Hexapod LUT is based on initial tests taken on this night
+#   Refinement will probably be needed once more data is available
+#   Added m1_pressure_minimum and set to ~6.5 PSI (45000 Pa), which is
+#   just above the minimum output for this transducer (6)
+
+correction_frequency: 1.
+
+m1:
+  -     114351.586
+  -    -220485.725
+  -     278187.272
+  -     -48810.102
+
+m1_lut_elevation_limits:
+    - 0.0
+    - 90.0
+
+m1_pressure_minimum: 45000.0
+
+m2:
+  - 2000.0
+
+m2_lut_elevation_limits:
+    - 0.0
+    - 90.0
+
+hexapod_x:
+  -          3.634
+  -         -4.934
+  -         -2.379
+
+hexapod_y:
+  -          2.249
+
+hexapod_z:
+  -         -0.217
+  -         -1.045
+
+hexapod_lut_elevation_limits:
+  - 30.
+  - 85.
+
+hexapod_u:
+  - 0.3500
+
+hexapod_v:
+  - 0.2200
+
+hexapod_w:
+  - 0.0000
+
+correction_tolerance:
+  m1: 500.
+  m2: 500.
+  x: 0.001
+  y: 0.001
+  z: 0.001
+  u: 0.001
+  v: 0.001
+
+chromatic_dependence:
+  - 2.1e-5
+  - 0.0
+
+hexapod_sensitivity_matrix:
+  -
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+  -
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+  -
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+      - 0.0
+  -
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+      - 0.0
+  -
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+      - 0.0
+  -
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
