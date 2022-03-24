@@ -6,6 +6,15 @@
 Version History
 ###############
 
+v1.9.0
+------
+
+Changes:
+
+  * Update CSC to salobj 7.
+  * Add type annotations and enable mypy checking.
+  * Modernize CSC unit tests.
+
 v1.8.1
 ------
 
