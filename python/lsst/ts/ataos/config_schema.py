@@ -33,13 +33,11 @@ properties:
   correction_frequency:
     description: The frequency which corrections should be applied (Hz).
     type: number
-    default: 1
   m1:
     description: List of polynomial coefficients for M1 correction equation.
     type: array
     items:
       type: number
-    default: [0.]
   m1_lut_elevation_limits:
     description: >-
         Elevation limits for the validity of the M1 pressure LUT. Any values
@@ -49,21 +47,16 @@ properties:
         type: number
         minItems: 2
         maxItems: 2
-    default:
-        - 0.
-        - 90.
   m1_pressure_minimum:
     description: >-
       Minimum pressure (in Pascal) for M1 LUT correction. If the computed
       correction is bellow this limit, the return value will be the limit.
     type: number
-    default: 0.0
   m2:
     description: List of polynomial coefficients for M2 correction equation.
     type: array
     items:
       type: number
-    default: [0.]
   m2_lut_elevation_limits:
     description: >-
         Elevation limits for the validity of the M2 pressure LUT. Any values
@@ -73,15 +66,11 @@ properties:
         type: number
         minItems: 2
         maxItems: 2
-    default:
-        - 0.
-        - 90.
   hexapod_x:
     description: List of polynomial coefficients for hexapod x-correction equation.
     type: array
     items:
       type: number
-    default: [0.]
   hexapod_lut_elevation_limits:
     description: >-
         Elevation limits for the validity of the hexapod position LUT. Any
@@ -92,33 +81,26 @@ properties:
         type: number
         minItems: 2
         maxItems: 2
-    default:
-        - 0.
-        - 90.
   hexapod_y:
     description: List of polynomial coefficients for hexapod y-correction equation.
     type: array
     items:
       type: number
-    default: [0.]
   hexapod_z:
     description: List of polynomial coefficients for hexapod z-correction equation (focus).
     type: array
     items:
       type: number
-    default: [0.]
   hexapod_u:
     description: List of polynomial coefficients for hexapod u-correction equation.
     type: array
     items:
       type: number
-    default: [0.]
   hexapod_v:
     description: List of polynomial coefficients for hexapod v-correction equation.
     type: array
     items:
       type: number
-    default: [0.]
   hexapod_sensitivity_matrix:
     description: >-
         A matrix to map the cross terms dependencies between hexapod axis.
@@ -136,49 +118,7 @@ properties:
         maxItems: 6
         items:
             type: number
-    default:
-        -
-            - 1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-        -
-            - 0.0
-            - 1.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-        -
-            - 0.0
-            - 0.0
-            - 1.0
-            - 0.0
-            - 0.0
-            - 0.0
-        -
-            - 0.0
-            - 0.0
-            - 0.0
-            - 1.0
-            - 0.0
-            - 0.0
-        -
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 1.0
-            - 0.0
-        -
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 0.0
-            - 1.0
+
   chromatic_dependence:
     description: >-
         List of polynomial coefficients for the relationship between focus
@@ -186,7 +126,6 @@ properties:
     type: array
     items:
       type: number
-    default: [0.]
   correction_tolerance:
     description: >-
         Tolerance on the correction. If the difference between the last
@@ -196,38 +135,48 @@ properties:
     properties:
       m1:
         type: number
-        default: 0.
         minimum: 0.
         description: Tolerance in the M1 pressure.
       m2:
         type: number
-        default: 0.
         minimum: 0.
         description: Tolerance in the M2 pressure.
       x:
         type: number
-        default: 0.
         minimum: 0.
         description: Tolerance in hexapod x position.
       y:
         type: number
-        default: 0.
         minimum: 0.
         description: Tolerance in hexapod y position.
       z:
         type: number
-        default: 0.
         minimum: 0.
         description: Tolerance in hexapod z position.
       u:
         type: number
-        default: 0.
         minimum: 0.
         description: Tolerance in hexapod u position.
       v:
         type: number
-        default: 0.
         minimum: 0.
         description: Tolerance in hexapod v position.
+required:
+- correction_frequency
+- m1
+- m1_pressure_minimum
+- m1_lut_elevation_limits
+- m2_lut_elevation_limits
+- m2
+- hexapod_x
+- hexapod_y
+- hexapod_z
+- hexapod_u
+- hexapod_v
+- hexapod_lut_elevation_limits
+- correction_tolerance
+- chromatic_dependence
+- hexapod_sensitivity_matrix
+additionalProperties: false
 """
 )
