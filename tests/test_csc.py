@@ -138,7 +138,7 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             try:
                 self.log.debug("Enabling ATAOS")
                 await salobj.set_summary_state(self.remote, salobj.State.ENABLED)
-                self.csc.cmd_timeout = 1.0
+                self.csc.cmd_timeout = 2.0  # 1s will timeout occasionally
 
                 await self.remote.cmd_enableCorrection.set_start(
                     m1=True, timeout=STD_TIMEOUT

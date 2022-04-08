@@ -50,9 +50,6 @@ hexapod_u:
 hexapod_v:
   - 0.2200
 
-hexapod_w:
-  - 0.0000
-
 correction_tolerance:
   m1: 500.
   m2: 500.
