@@ -161,5 +161,22 @@ properties:
         type: number
         minimum: 0.
         description: Tolerance in hexapod v position.
+required:
+- correction_frequency
+- m1
+- m1_pressure_minimum
+- m1_lut_elevation_limits
+- m2_lut_elevation_limits
+- m2
+- hexapod_x
+- hexapod_y
+- hexapod_z
+- hexapod_u
+- hexapod_v
+- hexapod_lut_elevation_limits
+- correction_tolerance
+- chromatic_dependence
+- hexapod_sensitivity_matrix
+additionalProperties: false
 """
 )
