@@ -24,12 +24,16 @@ from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
 from .config_schema import CONFIG_SCHEMA
 from .model import Model
 
-__all__ = ["ATAOS", "ShutterState", "DetailedState"]
+__all__ = ["ATAOS", "ShutterState", "DetailedState", "run_atos"]
 
 CORRECTION_LOOP_DIED = 8103
 """Error code for when the correction loop dies and the CSC is in enable
 state.
 """
+
+
+def run_atos() -> None:
+    asyncio.run(ATAOS.amain(index=None))
 
 
 class ShutterState(enum.IntEnum):

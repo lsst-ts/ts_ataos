@@ -267,7 +267,7 @@ class TestModel(unittest.TestCase):
                         )
 
     @staticmethod
-    def get_random_value_test_config() -> typing.Dict[str, typing.List[np.ndarray]]:
+    def get_random_value_test_config() -> typing.Dict[str, typing.List[float]]:
         return {
             "m1": [np.random.rand()],
             "m2": [np.random.rand()],
