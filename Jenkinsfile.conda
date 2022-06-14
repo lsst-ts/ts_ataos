@@ -1,2 +1,2 @@
 @Library('JenkinsShared')_
-CondaPipeline(["ts_config_attcs"], "ts-ataos", "lsst.ts.ataos")
+CondaPipeline(["ts_config_attcs"], "ts-ataos", "lsst.ts.ataos", "noarch")

@@ -24,7 +24,7 @@ import yaml
 
 CONFIG_SCHEMA = yaml.safe_load(
     """$schema: http://json-schema.org/draft-07/schema#
-$id: https://github.com/lsst-ts/ts_ATAOS/blob/master/schema/ATAOS.yaml
+$id: https://github.com/lsst-ts/ts_ataos/blob/main/python/lsst/ts/ataos/config_schema.py
 # title must end with one or more spaces followed by the schema version, which must begin with "v"
 title: ATAOS v4
 description: Schema for ATAOS configuration files
