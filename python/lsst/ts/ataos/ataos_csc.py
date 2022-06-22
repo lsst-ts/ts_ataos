@@ -24,12 +24,16 @@ from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
 from .config_schema import CONFIG_SCHEMA
 from .model import Model
 
-__all__ = ["ATAOS", "ShutterState", "DetailedState"]
+__all__ = ["ATAOS", "ShutterState", "DetailedState", "run_atos"]
 
 CORRECTION_LOOP_DIED = 8103
 """Error code for when the correction loop dies and the CSC is in enable
 state.
 """
+
+
+def run_atos() -> None:
+    asyncio.run(ATAOS.amain(index=None))
 
 
 class ShutterState(enum.IntEnum):
@@ -1850,7 +1854,10 @@ class ATAOS(ConfigurableCsc):
 
             if not apply_correction:
                 self.log.debug("All hexapod corrections inside tolerance. Skipping...")
-                # FIXME: Bit should be flipped back before returning
+                # Flip bit back before returning
+                await self.set_detailed_state(
+                    np.uint8(self.detailed_state ^ status_bit)
+                )
                 return
 
             evt_start_attr.set(elevation=elevation, azimuth=azimuth, **hexapod)
@@ -1872,6 +1879,7 @@ class ATAOS(ConfigurableCsc):
             finally:
                 await evt_end_attr.write()
                 # correction completed... flip bit on detailedState
+                # back to IDLE
                 await self.set_detailed_state(
                     np.uint8(self.detailed_state ^ status_bit)
                 )

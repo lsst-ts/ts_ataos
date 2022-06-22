@@ -6,6 +6,14 @@
 Version History
 ###############
 
+v1.10.0
+------
+
+Changes:
+
+  * Corrected issue of detailedState handling when correction values are below the correction tolerance.
+  * Switch to pyproject.toml.
+
 v1.9.0
 ------
 
@@ -33,7 +41,7 @@ Changes:
     For instance, if one wants to apply a tip/tilt correction when doing x/y translation, it is possible to specify the cross term in the sensitivity matrix.
   * Add feature that allow users to specify the valid range for LUTs.
     Any data beyond the limits return the value of the LUT in the limit.
-    For instance, if minimum valid elevation for hexapod LUT is 30 and a correction is requested for elevation 20, it returns the value in elevation 30. 
+    For instance, if minimum valid elevation for hexapod LUT is 30 and a correction is requested for elevation 20, it returns the value in elevation 30.
   * In `Model`, implement new feature in dealing with m1 correction when it is below the lower limit. Instead of returning a fixed correction, it will return a value that linearly approaches zero as elevation goes to zero.
   * Fix `Model.get_correction_m1` docstring, which said elevation parameter was ignored, where it should be azimuth.
   * In `ATAOS.do_resetOffset`, fix issue where the command would be rejected when trying to reset a correction that is not hexapod and hexapod correction is not enabled.
