@@ -10,7 +10,7 @@ build:
   noarch: generic
   script: python -m pip install --no-deps --ignore-installed .
   entry_points:
-    - ataos_csc = lsst.ts.ataos.ataos_csc:run_ataos
+    - run_ataos_csc = lsst.ts.ataos.ataos_csc:run_ataos_csc
   script_env:
     - LD_LIBRARY_PATH
     - OSPL_HOME
