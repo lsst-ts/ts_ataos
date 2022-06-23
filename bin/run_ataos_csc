@@ -2,4 +2,4 @@
 
 from lsst.ts.ataos import ataos_csc
 
-ataos_csc.run_atos()
+ataos_csc.run_ataos_csc()

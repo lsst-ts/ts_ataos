@@ -117,7 +117,7 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         await self.check_bin_script(
             name="ATAOS",
             index=None,
-            exe_name="ataos_csc",
+            exe_name="run_ataos_csc",
         )
 
     async def test_enable_twice(self) -> None:
