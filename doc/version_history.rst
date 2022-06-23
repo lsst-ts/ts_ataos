@@ -6,6 +6,15 @@
 Version History
 ###############
 
+v1.10.1
+-------
+
+Changes:
+
+  * Rename ataos_csc script to run_ataos_csc script.
+    Note that there was a typo in the method name, which gets superseeded by the rename.
+  * Add gitigore file.
+
 v1.10.0
 ------
 
