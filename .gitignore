@@ -1,0 +1,15 @@
+.swp
+.mypy_cache
+.pytest_cache
+.coverage*
+.hypothesis
+pytest_session.txt
+.scon*
+*.log
+__pycache__
+tests/.tests
+tests/measurements/*.json
+version.py
+.eggs
+*.egg_info
+.vscode
