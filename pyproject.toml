@@ -17,7 +17,7 @@ version = { attr = "setuptools_scm.get_version" }
 where = [ "python" ]
 
 [project.scripts]
-ataos_csc = "lsst.ts.ataos.ataos_csc:run_ataos"
+run_ataos_csc = "lsst.ts.ataos.ataos_csc:run_ataos_csc"
 
 [tool.setuptools_scm]
 write_to = "python/lsst/ts/ataos/version.py"
