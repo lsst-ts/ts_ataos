@@ -1054,11 +1054,13 @@ class ATAOS(ConfigurableCsc):
                     else:
                         RuntimeError("Failed to open m1 air valve.")
 
-                # FIXME: ATPneumatics is not ready to set pressure just after
+                # FIXME DM-36212: 
+                # ATPneumatics is not ready to set pressure just after
                 # the valve is opened and there is currently no event to
-                # indicate readiness. Wait 1 heartbeat internal after command
-                # finishes. Once this is fixed the sleep can be removed.
-                await asyncio.sleep(self.heartbeat_interval)
+                # indicate readiness. Wait 3 heartbeat intervals after command
+                # finishes. A single heartbeat was not sufficient.
+                # Once this is fixed the sleep can be removed.
+                await asyncio.sleep(3*self.heartbeat_interval)
 
                 # Set pressure to zero.
                 await self.pneumatics.cmd_m1SetPressure.set_start(
