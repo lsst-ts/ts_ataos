@@ -6,6 +6,13 @@
 Version History
 ###############
 
+v1.10.2
+-------
+
+Changes:
+
+  * Increased timeout between opening valves and commanding a new air pressure to prevent a current race condition in the ATPneumatics.
+
 v1.10.1
 -------
 
