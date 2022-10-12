@@ -1,7 +1,9 @@
+import logging
 import typing
 import unittest
+
 import numpy as np
-import logging
+
 from lsst.ts.ataos import Model
 
 logger = logging.getLogger(__name__)

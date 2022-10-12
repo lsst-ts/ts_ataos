@@ -1,26 +1,24 @@
 import asyncio
-import traceback
-import enum
-import typing
-import numpy as np
 import copy
+import enum
+import traceback
+import typing
 
-from lsst.ts import utils
-
+import numpy as np
+from lsst.ts.idl.enums import ATPneumatics
+from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
 from lsst.ts.salobj import (
+    AckError,
     ConfigurableCsc,
     Remote,
-    State,
-    AckError,
     SalRetCode,
+    State,
     type_hints,
 )
 
-from lsst.ts.idl.enums import ATPneumatics
+from lsst.ts import utils
+
 from . import __version__
-
-from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
-
 from .config_schema import CONFIG_SCHEMA
 from .model import Model
 
