@@ -3,6 +3,7 @@ This configuration only affects single-package Sphinx documentation builds.
 """
 
 from documenteer.conf.pipelinespkg import *  # noqa
+
 import lsst.ts.ataos  # noqa
 
 project = "ts_ataos"

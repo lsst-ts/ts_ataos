@@ -6,6 +6,17 @@
 Version History
 ###############
 
+v1.10.3
+-------
+
+Changes:
+
+  * Update conda recipe to properly handle builds for different versions of Python and to use ``pytest`` instead of ``py.test``.
+  * Fix bug in ATAOS referencing ``self.self`` and update subsequent warning message to log the appropriate information.
+  * Update pyproject.toml to include isort configuration.
+  * Update pre-commit hooks configuration.
+  * Run isort in the entire package to organize import statements.
+
 v1.10.2
 -------
 

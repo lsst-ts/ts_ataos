@@ -18,20 +18,19 @@
 #
 # You should have received a copy of the GNU General Public License
 
-import pytest
 import asyncio
+import contextlib
+import logging
 import pathlib
 import typing
 import unittest
 import unittest.mock
-import contextlib
-import logging
 
 import numpy as np
+import pytest
+from lsst.ts.idl.enums import ATPneumatics
 
 from lsst.ts import ataos, salobj
-
-from lsst.ts.idl.enums import ATPneumatics
 
 STD_TIMEOUT = 5  # standard command timeout (sec)
 LONG_TIMEOUT = 20  # timeout for starting SAL components (sec)
