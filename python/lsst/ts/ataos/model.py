@@ -1,5 +1,6 @@
-import typing
 import logging
+import typing
+
 import numpy as np
 
 __all__ = ["Model"]
