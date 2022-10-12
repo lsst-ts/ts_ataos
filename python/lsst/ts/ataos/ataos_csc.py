@@ -1918,7 +1918,7 @@ class ATAOS(ConfigurableCsc):
         ):
             self.log.warning(
                 f"No atspectrograph corrections loaded but focus_offsets "
-                f"of {self.self.pointing_offsets_yet_to_be_applied} are "
+                f"of {self.focus_offset_yet_to_be_applied} are "
                 f"non-zero and above the numerical noise floor"
             )
         if (
