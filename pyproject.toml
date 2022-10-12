@@ -42,5 +42,9 @@ ignore_missing_imports = "True"
 # because pytest explicitly specifies each file being tested, and that overrides mypy's exclude.
 exclude = "version.py"
 
+[tool.isort]
+profile = "black"
+src_paths = ["python", "test"]
+
 [project.optional-dependencies]
 dev = ["documenteer[pipelines]"]
