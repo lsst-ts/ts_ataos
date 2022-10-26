@@ -2070,7 +2070,11 @@ class ATAOS(ConfigurableCsc):
 
             # Should only publish correction completed if no further
             # corrections are required
-            self.atspectrograph_corrections_required -= 1
+            # Add check to make sure it's not possible for the corrections
+            # to be less than zero.
+            if self.atspectrograph_corrections_required > 0:
+                self.atspectrograph_corrections_required -= 1
+
             self.log.debug(
                 "Corrections completed?"
                 f"Pointing residuals zero?: "
