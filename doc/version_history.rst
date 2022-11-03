@@ -6,6 +6,14 @@
 Version History
 ###############
 
+v1.10.4
+-------
+
+Changes:
+
+  * Fix bug where if statement in ATSpectrograph correction loop could always be true if self.atspectrograph_corrections_required was less than zero. 
+
+
 v1.10.3
 -------
 
