@@ -43,7 +43,11 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         config_dir: typing.Union[str, pathlib.Path, None],
         simulation_mode: int,
     ) -> salobj.base_csc.BaseCsc:
-        return ataos.ATAOS(config_dir=config_dir)
+        return ataos.ATAOS(
+            config_dir=config_dir,
+            initial_state=initial_state,
+            simulation_mode=simulation_mode,
+        )
 
     def setUp(self) -> None:
         self.log = logging.getLogger(type(self).__name__)
@@ -96,7 +100,7 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         * standby: DISABLED to STANDBY
         * exitControl: STANDBY, FAULT to OFFLINE (quit)
         """
-        async with self.make_csc():
+        async with self.make_csc(initial_state=salobj.State.STANDBY):
             await self.check_standard_state_transitions(
                 enabled_commands=(
                     "applyCorrection",
@@ -118,7 +122,7 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_enable_twice(self) -> None:
-        async with self.make_csc():
+        async with self.make_csc(initial_state=salobj.State.STANDBY):
             await salobj.set_summary_state(self.remote, salobj.State.ENABLED)
             await salobj.set_summary_state(self.remote, salobj.State.STANDBY)
             await salobj.set_summary_state(self.remote, salobj.State.ENABLED)
@@ -130,7 +134,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         position. It only works when the correction loop is not enabled.
         """
 
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             try:
                 self.log.debug("Enabling ATAOS")
                 await salobj.set_summary_state(self.remote, salobj.State.ENABLED)
@@ -153,7 +159,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         position. It only works when the correction loop is not enabled.
         """
 
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             await self.camera.evt_shutterDetailedState.set_write(
                 substate=ataos.ShutterState.OPEN,
             )
@@ -175,7 +183,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         position. It only works when the correction loop is not enabled.
         """
 
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             elevation = self._telescope_elevation
             azimuth = self._telescope_azimuth
 
@@ -188,7 +198,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_offset_fail_corrections_disabled(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             offset = {
                 "m1": 1.0,
                 "m2": 1.0,
@@ -203,7 +215,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
                 await self.remote.cmd_offset.set_start(**offset, timeout=STD_TIMEOUT)
 
     async def test_offset(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             await self.remote.cmd_enableCorrection.set_start(
                 m1=True,
                 m2=True,
@@ -232,7 +246,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_spectrograph_offsets(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             self.flush_spectrograph_samples()
 
             await self.remote.cmd_enableCorrection.set_start(
@@ -244,7 +260,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             await self.assert_correction_atspectrograph()
 
     async def test_spectrograph_offsets_with_user_offset(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             self.flush_spectrograph_samples()
 
             await self.remote.cmd_enableCorrection.set_start(
@@ -265,7 +283,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             await self.assert_spectrograph_offsets_with_user_offset()
 
     async def test_spectrograph_offsets_change_filter(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             await self.remote.cmd_enableCorrection.set_start(
                 atspectrograph=True,
                 hexapod=True,
@@ -284,7 +304,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             await self.assert_correction_atspectrograph()
 
     async def test_spectrograph_offsets_republished_filter(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             await self.remote.cmd_enableCorrection.set_start(
                 atspectrograph=True,
                 hexapod=True,
@@ -302,7 +324,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_spectrograph_offsets_change_disperser(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             await self.remote.cmd_enableCorrection.set_start(
                 atspectrograph=True,
                 hexapod=True,
@@ -320,7 +344,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             await self.assert_correction_atspectrograph()
 
     async def test_spectrograph_offsets_republished_disperser(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             await self.remote.cmd_enableCorrection.set_start(
                 atspectrograph=True,
                 hexapod=True,
@@ -338,26 +364,37 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_enable_corrections_fails_no_correction_set(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             with self.assertRaises(salobj.AckError):
                 await self.remote.cmd_enableCorrection.set_start(timeout=STD_TIMEOUT)
 
-    async def test_enable_corrections_m1(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
-            await self.assert_enable_corrections(m1=True)
-
-    async def test_enable_corrections_m2(self) -> None:
+    async def test_enable_disable_corrections_m1(self) -> None:
         async with self.make_csc(
-            config_dir=TEST_CONFIG_DIR
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
+            await self.assert_enable_corrections(m1=True)
+            await self.assert_disable_corrections(m1=True)
+
+    async def test_enable_disable_corrections_m2(self) -> None:
+        async with self.make_csc(
+            config_dir=TEST_CONFIG_DIR,
+            initial_state=salobj.State.STANDBY,
         ), self.mock_auxtel(), self.enable_csc():
             await self.assert_enable_corrections(m2=True)
+            await self.assert_disable_corrections(m2=True)
 
     async def test_enable_corrections_hexapod(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             await self.assert_enable_corrections(hexapod=True)
 
     async def test_enable_corrections_atspectrograph(self) -> None:
-        async with self.make_csc(), self.mock_auxtel(), self.enable_csc():
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel(), self.enable_csc():
             self.flush_spectrograph_samples()
 
             await self.assert_enable_corrections(atspectrograph=True)
@@ -380,6 +417,32 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             if self.expected_corrections[correction]:
                 await self.assert_correction(correction)
 
+    async def assert_disable_corrections(self, **kwargs: typing.Any) -> None:
+        self.expected_corrections.update(
+            [(item, not value) for (item, value) in kwargs.items()]
+        )
+
+        self.remote.evt_correctionEnabled.flush()
+
+        await self.remote.cmd_disableCorrection.set_start(**kwargs, timeout=STD_TIMEOUT)
+
+        await self.assert_next_sample(
+            topic=self.remote.evt_correctionEnabled,
+            **self.expected_corrections,
+        )
+
+        for correction in self.expected_corrections:
+            if self.expected_corrections[correction]:
+                await self.assert_correction(correction)
+
+        if kwargs.get("m1", False):
+            self.pneumatics.cmd_m1SetPressure.callback.assert_awaited()
+            self.pneumatics.cmd_m1CloseAirValve.callback.assert_awaited()
+
+        if kwargs.get("m2", False):
+            self.pneumatics.cmd_m2SetPressure.callback.assert_awaited()
+            self.pneumatics.cmd_m2CloseAirValve.callback.assert_awaited()
+
     async def apply_user_offsets(self, offset: typing.Dict[str, float]) -> None:
         self.user_offsets.update(offset)
 
@@ -391,8 +454,8 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         elevation: float,
         azimuth: float,
     ) -> None:
-        self.pnematics.cmd_m1SetPressure.callback.assert_awaited()
-        self.pnematics.cmd_m2SetPressure.callback.assert_awaited()
+        self.pneumatics.cmd_m1SetPressure.callback.assert_awaited()
+        self.pneumatics.cmd_m2SetPressure.callback.assert_awaited()
 
         if while_exposing:
             self.hexapod.cmd_moveToPosition.callback.assert_not_awaited()
@@ -494,15 +557,15 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         await getattr(self, f"assert_correction_{correction}")()
 
     async def assert_correction_m1(self) -> None:
-        self.pnematics.cmd_m1SetPressure.callback.assert_called()
-        self.pnematics.cmd_m1OpenAirValve.callback.assert_called()
+        self.pneumatics.cmd_m1SetPressure.callback.assert_called()
+        self.pneumatics.cmd_m1OpenAirValve.callback.assert_called()
 
         await self.assert_next_sample(topic=self.remote.evt_m1CorrectionStarted)
         await self.assert_next_sample(topic=self.remote.evt_m1CorrectionCompleted)
 
     async def assert_correction_m2(self) -> None:
-        self.pnematics.cmd_m2SetPressure.callback.assert_called()
-        self.pnematics.cmd_m2OpenAirValve.callback.assert_called()
+        self.pneumatics.cmd_m2SetPressure.callback.assert_called()
+        self.pneumatics.cmd_m2OpenAirValve.callback.assert_called()
 
         await self.assert_next_sample(topic=self.remote.evt_m2CorrectionStarted)
         await self.assert_next_sample(topic=self.remote.evt_m2CorrectionCompleted)
@@ -627,7 +690,7 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
                 "ATPtg"
             ) as self.atptg, salobj.Controller(
                 "ATPneumatics"
-            ) as self.pnematics, salobj.Controller(
+            ) as self.pneumatics, salobj.Controller(
                 "ATHexapod"
             ) as self.hexapod, salobj.Controller(
                 "ATCamera"
@@ -657,22 +720,22 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             raise exception
 
     def set_pneumatics_callbacks(self) -> None:
-        self.pnematics.cmd_m1SetPressure.callback = unittest.mock.AsyncMock(
+        self.pneumatics.cmd_m1SetPressure.callback = unittest.mock.AsyncMock(
             wraps=self.m1_set_pressure_callback
         )
-        self.pnematics.cmd_m2SetPressure.callback = unittest.mock.AsyncMock(
+        self.pneumatics.cmd_m2SetPressure.callback = unittest.mock.AsyncMock(
             wraps=self.m2_set_pressure_callback
         )
-        self.pnematics.cmd_m1OpenAirValve.callback = unittest.mock.AsyncMock(
+        self.pneumatics.cmd_m1OpenAirValve.callback = unittest.mock.AsyncMock(
             wraps=self.m1_open_callback
         )
-        self.pnematics.cmd_m2OpenAirValve.callback = unittest.mock.AsyncMock(
+        self.pneumatics.cmd_m2OpenAirValve.callback = unittest.mock.AsyncMock(
             wraps=self.m2_open_callback
         )
-        self.pnematics.cmd_m1CloseAirValve.callback = unittest.mock.AsyncMock(
+        self.pneumatics.cmd_m1CloseAirValve.callback = unittest.mock.AsyncMock(
             wraps=self.m1_close_callback
         )
-        self.pnematics.cmd_m2CloseAirValve.callback = unittest.mock.AsyncMock(
+        self.pneumatics.cmd_m2CloseAirValve.callback = unittest.mock.AsyncMock(
             wraps=self.m2_close_callback
         )
 
@@ -687,19 +750,19 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         )
 
     async def publish_pneumatics_initial_data(self) -> None:
-        await self.pnematics.evt_summaryState.set_write(
+        await self.pneumatics.evt_summaryState.set_write(
             summaryState=salobj.State.ENABLED
         )
-        await self.pnematics.evt_mainValveState.set_write(
+        await self.pneumatics.evt_mainValveState.set_write(
             state=ATPneumatics.AirValveState.OPENED
         )
-        await self.pnematics.evt_instrumentState.set_write(
+        await self.pneumatics.evt_instrumentState.set_write(
             state=ATPneumatics.AirValveState.OPENED
         )
-        await self.pnematics.evt_m1State.set_write(
+        await self.pneumatics.evt_m1State.set_write(
             state=ATPneumatics.AirValveState.CLOSED
         )
-        await self.pnematics.evt_m2State.set_write(
+        await self.pneumatics.evt_m2State.set_write(
             state=ATPneumatics.AirValveState.CLOSED
         )
 
@@ -743,28 +806,28 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         )
 
     async def m1_set_pressure_callback(self, data: typing.Any) -> None:
-        await self.pnematics.tel_m1AirPressure.set_write(pressure=data.pressure)
+        await self.pneumatics.tel_m1AirPressure.set_write(pressure=data.pressure)
 
     async def m2_set_pressure_callback(self, data: typing.Any) -> None:
-        await self.pnematics.tel_m2AirPressure.set_write(pressure=data.pressure)
+        await self.pneumatics.tel_m2AirPressure.set_write(pressure=data.pressure)
 
     async def m1_open_callback(self, data: typing.Any) -> None:
-        await self.pnematics.evt_m1State.set_write(
+        await self.pneumatics.evt_m1State.set_write(
             state=ATPneumatics.AirValveState.OPENED
         )
 
     async def m2_open_callback(self, data: typing.Any) -> None:
-        await self.pnematics.evt_m2State.set_write(
+        await self.pneumatics.evt_m2State.set_write(
             state=ATPneumatics.AirValveState.OPENED
         )
 
     async def m1_close_callback(self, data: typing.Any) -> None:
-        await self.pnematics.evt_m1State.set_write(
+        await self.pneumatics.evt_m1State.set_write(
             state=ATPneumatics.AirValveState.CLOSED
         )
 
     async def m2_close_callback(self, data: typing.Any) -> None:
-        await self.pnematics.evt_m2State.set_write(
+        await self.pneumatics.evt_m2State.set_write(
             state=ATPneumatics.AirValveState.CLOSED
         )
 
