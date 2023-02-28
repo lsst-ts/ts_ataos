@@ -1135,13 +1135,10 @@ class ATAOS(ConfigurableCsc):
         self.mark_corrections(data, False)
         await asyncio.sleep(0.0)  # give control back to event loop
 
-        # Lower mirrors if appropriate
-        if data == "disableAll":
-            await self.lower_mirrors_to_hardpoints(m1=True, m2=True)
-        elif data == "m1":
-            await self.lower_mirrors_to_hardpoints(m1=True, m2=False)
-        elif data == "m2":
-            await self.lower_mirrors_to_hardpoints(m1=False, m2=True)
+        await self.lower_mirrors_to_hardpoints(
+            m1=data.m1 or data.disableAll,
+            m2=data.m2 or data.disableAll,
+        )
 
         await self.publish_enable_corrections()
 
