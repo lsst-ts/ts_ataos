@@ -6,6 +6,16 @@
 Version History
 ###############
 
+v1.10.5
+-------
+
+Changes:
+
+  * Fix bug in ``disableCorrections``.
+  * Future proof CSC code; make callbacks coroutines and update CSC class interface to conform with the latest version of salobj.
+  * Update pre-commit-config.
+  * Update CSC unit tests.
+
 v1.10.4
 -------
 
