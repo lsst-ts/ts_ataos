@@ -6,6 +6,13 @@
 Version History
 ###############
 
+v1.10.5
+-------
+
+Changes:
+
+  * Fix bug in ``disableCorrections``.
+
 v1.10.4
 -------
 
