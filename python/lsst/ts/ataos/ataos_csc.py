@@ -1514,7 +1514,7 @@ class ATAOS(ConfigurableCsc):
             moveWhileExposing=self.move_while_exposing, **kwargs
         )
 
-    def shutter_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def shutter_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """A callback function to monitor the camera shutter.
 
         Parameters
@@ -1524,7 +1524,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.camera_exposing = data.substate != ShutterState.CLOSED
 
-    def atspectrograph_filter_monitor_callback(
+    async def atspectrograph_filter_monitor_callback(
         self, data: type_hints.BaseMsgType
     ) -> None:
         """A callback function to monitor the atspectrograph filter/grating
@@ -1582,7 +1582,7 @@ class ATAOS(ConfigurableCsc):
         self.pointing_offsets_per_category["filter"] = np.array(data.pointingOffsets)
         self.pointing_offsets_yet_to_be_applied += _pointing_offsets_to_apply
 
-    def atspectrograph_disperser_monitor_callback(
+    async def atspectrograph_disperser_monitor_callback(
         self, data: type_hints.BaseMsgType
     ) -> None:
         """A callback function to monitor the atspectrograph filter/grating
@@ -1628,7 +1628,7 @@ class ATAOS(ConfigurableCsc):
         self.pointing_offsets_per_category["disperser"] = np.array(data.pointingOffsets)
         self.pointing_offsets_yet_to_be_applied += _pointing_offsets_to_apply
 
-    def hexapod_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def hexapod_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """A callback function to monitor position updates on the hexapod.
 
         Parameters
@@ -1642,7 +1642,7 @@ class ATAOS(ConfigurableCsc):
         self.current_positions["u"] = data.positionU
         self.current_positions["v"] = data.positionV
 
-    def m1_pressure_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def m1_pressure_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback function to monitor M1 pressure
 
         Parameters
@@ -1652,7 +1652,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.current_positions["m1"] = data.pressure
 
-    def m2_pressure_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def m2_pressure_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback function to monitor M2 pressure
 
         Parameters
@@ -2142,7 +2142,7 @@ class ATAOS(ConfigurableCsc):
         self.model.m2_lut_elevation_limits = config.m2_lut_elevation_limits
         self.model.hexapod_lut_elevation_limits = config.hexapod_lut_elevation_limits
 
-    def atspectrograph_summary_state_callback(
+    async def atspectrograph_summary_state_callback(
         self, data: type_hints.BaseMsgType
     ) -> None:
         """Callback to monitor summary state from atspectrograph. If this
@@ -2286,7 +2286,9 @@ class ATAOS(ConfigurableCsc):
 
         await super().fault(code=code, report=report, traceback=traceback)
 
-    def pneumatics_summary_state_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def pneumatics_summary_state_callback(
+        self, data: type_hints.BaseMsgType
+    ) -> None:
         """Callback to monitor summary state from atpneumatics.
 
         Parameters
@@ -2296,7 +2298,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.pneumatics_summary_state = State(data.summaryState)
 
-    def pneumatics_main_valve_state_callback(
+    async def pneumatics_main_valve_state_callback(
         self, data: type_hints.BaseMsgType
     ) -> None:
         """Callback to monitor main valve state from atpneumatics.
@@ -2308,7 +2310,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.pneumatics_main_valve_state = ATPneumatics.AirValveState(data.state)
 
-    def pneumatics_instrument_state_callback(
+    async def pneumatics_instrument_state_callback(
         self, data: type_hints.BaseMsgType
     ) -> None:
         """Callback to monitor instrument valve state from atpneumatics.
@@ -2320,7 +2322,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.pneumatics_instrument_valve_state = ATPneumatics.AirValveState(data.state)
 
-    def pneumatics_m1_state_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def pneumatics_m1_state_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback to monitor m1 valve state from atpneumatics.
 
         Parameters
@@ -2330,7 +2332,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.pneumatics_m1_state = ATPneumatics.AirValveState(data.state)
 
-    def pneumatics_m2_state_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def pneumatics_m2_state_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback to monitor m2 valve state from atpneumatics.
 
         Parameters
