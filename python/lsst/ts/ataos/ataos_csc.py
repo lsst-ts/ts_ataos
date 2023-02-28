@@ -5,6 +5,7 @@ import traceback
 import typing
 
 import numpy as np
+from lsst.ts import utils
 from lsst.ts.idl.enums import ATPneumatics
 from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
 from lsst.ts.salobj import (
@@ -15,8 +16,6 @@ from lsst.ts.salobj import (
     State,
     type_hints,
 )
-
-from lsst.ts import utils
 
 from . import __version__
 from .config_schema import CONFIG_SCHEMA
@@ -441,7 +440,6 @@ class ATAOS(ConfigurableCsc):
             self.atspectrograph_summary_state is None
             and self.atspectrograph.evt_summaryState.has_callback is False
         ):
-
             try:
                 self.atspectrograph_summary_state = (
                     await self.atspectrograph.evt_summaryState.aget(
@@ -718,7 +716,6 @@ class ATAOS(ConfigurableCsc):
         # the corrections are being applied
 
         async with self.correction_loop_lock:
-
             # Clear the last correction_loop_completed event
             self.correction_loop_completed_evt.clear()
 
@@ -780,7 +777,6 @@ class ATAOS(ConfigurableCsc):
         # Grab the asyncio lock so no offsets can be added while
         # the corrections are being applied
         async with self.correction_loop_lock:
-
             self.model.set_offset(data.axis, data.offset)
 
             # Wait for correction to be applied.
@@ -920,7 +916,6 @@ class ATAOS(ConfigurableCsc):
         # and the expressions are fast we'll apply the lock before the check.
 
         async with self.correction_loop_lock:
-
             if len(data.axis) == 0 or data.axis == "all":
                 # Verify all loops are closed
                 if not (
@@ -1272,7 +1267,6 @@ class ATAOS(ConfigurableCsc):
             # Grab the asyncio lock so no offsets can be added while
             # the corrections are being applied
             async with self.correction_loop_lock:
-
                 try:
                     corrections_to_apply = []
                     if self.azimuth is not None and self.elevation is not None:
@@ -2348,7 +2342,6 @@ class ATAOS(ConfigurableCsc):
         self.pneumatics_m2_state = ATPneumatics.AirValveState(data.state)
 
     async def close(self) -> None:
-
         await self.atcs.close()
         await super().close()
         await self.camera.close()

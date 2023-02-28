@@ -3,7 +3,6 @@ import typing
 import unittest
 
 import numpy as np
-
 from lsst.ts.ataos import Model
 
 logger = logging.getLogger(__name__)
@@ -21,11 +20,9 @@ class TestModel(unittest.TestCase):
         self.test_wavelengths = np.linspace(320.0, 1100.0, 10)  # min, max, steps
 
     def test_corrections_default_values(self) -> None:
-
         self.assert_ataos_corrections(self.get_zero_test_config())
 
     def test_corrections_random_values(self) -> None:
-
         test_config = self.get_random_value_test_config()
 
         self.set_model_test_config_values(test_config)
@@ -44,7 +41,6 @@ class TestModel(unittest.TestCase):
                 )
 
     def test_corrections_hexapod_sensitivity_matrix_x(self) -> None:
-
         # This sensitivity matrix will make the correction in x propaget to all
         # other axis, while nullifying the correction on the axis itself.
         # For example is there is 0 correction in x, and 10 correction in y,
@@ -73,7 +69,6 @@ class TestModel(unittest.TestCase):
         )
 
     def test_corrections_hexapod_sensitivity_matrix_y(self) -> None:
-
         hexapod_sensitivity_matrix_propagete_axis = np.array(
             [
                 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x
@@ -96,7 +91,6 @@ class TestModel(unittest.TestCase):
         )
 
     def test_corrections_hexapod_sensitivity_matrix_z(self) -> None:
-
         hexapod_sensitivity_matrix_propagete_axis = np.array(
             [
                 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x
@@ -119,7 +113,6 @@ class TestModel(unittest.TestCase):
         )
 
     def test_get_lut_elevation(self) -> None:
-
         limits = [20.0, 80.0]
 
         for inclination in [0.0, 5.0, 10.0, 15]:
@@ -134,7 +127,6 @@ class TestModel(unittest.TestCase):
             self.assertEqual(self.model.get_lut_elevation(inclination, limits), 80.0)
 
     def test_set_hexapod_sensitivity_matrix_as_list(self) -> None:
-
         new_hexapod_sensitivity_matrix = [
             [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x
             [0.0, -1.0, 0.0, 0.0, 0.0, 0.0],  # y
@@ -154,7 +146,6 @@ class TestModel(unittest.TestCase):
                 self.assertEqual(value_original, value_set)
 
     def test_set_hexapod_sensitivity_matrix_wrong_size(self) -> None:
-
         bad_hexapod_sensitivity_matrix_5x6 = np.array(
             [
                 [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # x
@@ -183,7 +174,6 @@ class TestModel(unittest.TestCase):
             self.model.hexapod_sensitivity_matrix = bad_hexapod_sensitivity_matrix_6x5
 
     def test_get_correction_m1_out_of_bound_factor(self) -> None:
-
         correction_m1_lut = 1.0
 
         self.model.m1_lut_elevation_limits = [20.0, 80]
@@ -234,7 +224,6 @@ class TestModel(unittest.TestCase):
         test_config: typing.Dict[str, typing.Any],
         check_values: typing.Dict[str, typing.Any],
     ) -> None:
-
         self.model.hexapod_sensitivity_matrix = test_hexapod_sensitivity_matrix
 
         self.set_model_test_config_values(test_config)
@@ -244,7 +233,6 @@ class TestModel(unittest.TestCase):
     def assert_ataos_corrections(
         self, corrections: typing.Dict[str, typing.Any]
     ) -> None:
-
         # correction is a polynomial so all values should be equal to the
         # values on test_config
         axis = "xyzuv"
@@ -302,5 +290,4 @@ class TestModel(unittest.TestCase):
 
 
 if __name__ == "__main__":
-
     unittest.main()
