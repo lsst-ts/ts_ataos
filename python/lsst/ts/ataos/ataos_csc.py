@@ -76,6 +76,7 @@ class ATAOS(ConfigurableCsc):
         self,
         config_dir: typing.Optional[str] = None,
         initial_state: State = State.STANDBY,
+        simulation_mode: int = 0,
     ) -> None:
         """
         Initialize AT AOS CSC.
@@ -87,6 +88,7 @@ class ATAOS(ConfigurableCsc):
             config_schema=CONFIG_SCHEMA,
             config_dir=config_dir,
             initial_state=initial_state,
+            simulation_mode=simulation_mode,
         )
 
         self.model = Model(self.log)
