@@ -5,6 +5,7 @@ import traceback
 import typing
 
 import numpy as np
+from lsst.ts import utils
 from lsst.ts.idl.enums import ATPneumatics
 from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
 from lsst.ts.salobj import (
@@ -15,8 +16,6 @@ from lsst.ts.salobj import (
     State,
     type_hints,
 )
-
-from lsst.ts import utils
 
 from . import __version__
 from .config_schema import CONFIG_SCHEMA
@@ -77,6 +76,7 @@ class ATAOS(ConfigurableCsc):
         self,
         config_dir: typing.Optional[str] = None,
         initial_state: State = State.STANDBY,
+        simulation_mode: int = 0,
     ) -> None:
         """
         Initialize AT AOS CSC.
@@ -88,6 +88,7 @@ class ATAOS(ConfigurableCsc):
             config_schema=CONFIG_SCHEMA,
             config_dir=config_dir,
             initial_state=initial_state,
+            simulation_mode=simulation_mode,
         )
 
         self.model = Model(self.log)
@@ -441,7 +442,6 @@ class ATAOS(ConfigurableCsc):
             self.atspectrograph_summary_state is None
             and self.atspectrograph.evt_summaryState.has_callback is False
         ):
-
             try:
                 self.atspectrograph_summary_state = (
                     await self.atspectrograph.evt_summaryState.aget(
@@ -718,7 +718,6 @@ class ATAOS(ConfigurableCsc):
         # the corrections are being applied
 
         async with self.correction_loop_lock:
-
             # Clear the last correction_loop_completed event
             self.correction_loop_completed_evt.clear()
 
@@ -780,7 +779,6 @@ class ATAOS(ConfigurableCsc):
         # Grab the asyncio lock so no offsets can be added while
         # the corrections are being applied
         async with self.correction_loop_lock:
-
             self.model.set_offset(data.axis, data.offset)
 
             # Wait for correction to be applied.
@@ -920,7 +918,6 @@ class ATAOS(ConfigurableCsc):
         # and the expressions are fast we'll apply the lock before the check.
 
         async with self.correction_loop_lock:
-
             if len(data.axis) == 0 or data.axis == "all":
                 # Verify all loops are closed
                 if not (
@@ -1140,13 +1137,10 @@ class ATAOS(ConfigurableCsc):
         self.mark_corrections(data, False)
         await asyncio.sleep(0.0)  # give control back to event loop
 
-        # Lower mirrors if appropriate
-        if data == "disableAll":
-            await self.lower_mirrors_to_hardpoints(m1=True, m2=True)
-        elif data == "m1":
-            await self.lower_mirrors_to_hardpoints(m1=True, m2=False)
-        elif data == "m2":
-            await self.lower_mirrors_to_hardpoints(m1=False, m2=True)
+        await self.lower_mirrors_to_hardpoints(
+            m1=data.m1 or data.disableAll,
+            m2=data.m2 or data.disableAll,
+        )
 
         await self.publish_enable_corrections()
 
@@ -1272,7 +1266,6 @@ class ATAOS(ConfigurableCsc):
             # Grab the asyncio lock so no offsets can be added while
             # the corrections are being applied
             async with self.correction_loop_lock:
-
                 try:
                     corrections_to_apply = []
                     if self.azimuth is not None and self.elevation is not None:
@@ -1521,7 +1514,7 @@ class ATAOS(ConfigurableCsc):
             moveWhileExposing=self.move_while_exposing, **kwargs
         )
 
-    def shutter_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def shutter_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """A callback function to monitor the camera shutter.
 
         Parameters
@@ -1531,7 +1524,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.camera_exposing = data.substate != ShutterState.CLOSED
 
-    def atspectrograph_filter_monitor_callback(
+    async def atspectrograph_filter_monitor_callback(
         self, data: type_hints.BaseMsgType
     ) -> None:
         """A callback function to monitor the atspectrograph filter/grating
@@ -1589,7 +1582,7 @@ class ATAOS(ConfigurableCsc):
         self.pointing_offsets_per_category["filter"] = np.array(data.pointingOffsets)
         self.pointing_offsets_yet_to_be_applied += _pointing_offsets_to_apply
 
-    def atspectrograph_disperser_monitor_callback(
+    async def atspectrograph_disperser_monitor_callback(
         self, data: type_hints.BaseMsgType
     ) -> None:
         """A callback function to monitor the atspectrograph filter/grating
@@ -1635,7 +1628,7 @@ class ATAOS(ConfigurableCsc):
         self.pointing_offsets_per_category["disperser"] = np.array(data.pointingOffsets)
         self.pointing_offsets_yet_to_be_applied += _pointing_offsets_to_apply
 
-    def hexapod_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def hexapod_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """A callback function to monitor position updates on the hexapod.
 
         Parameters
@@ -1649,7 +1642,7 @@ class ATAOS(ConfigurableCsc):
         self.current_positions["u"] = data.positionU
         self.current_positions["v"] = data.positionV
 
-    def m1_pressure_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def m1_pressure_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback function to monitor M1 pressure
 
         Parameters
@@ -1659,7 +1652,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.current_positions["m1"] = data.pressure
 
-    def m2_pressure_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def m2_pressure_monitor_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback function to monitor M2 pressure
 
         Parameters
@@ -2149,7 +2142,7 @@ class ATAOS(ConfigurableCsc):
         self.model.m2_lut_elevation_limits = config.m2_lut_elevation_limits
         self.model.hexapod_lut_elevation_limits = config.hexapod_lut_elevation_limits
 
-    def atspectrograph_summary_state_callback(
+    async def atspectrograph_summary_state_callback(
         self, data: type_hints.BaseMsgType
     ) -> None:
         """Callback to monitor summary state from atspectrograph. If this
@@ -2293,7 +2286,9 @@ class ATAOS(ConfigurableCsc):
 
         await super().fault(code=code, report=report, traceback=traceback)
 
-    def pneumatics_summary_state_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def pneumatics_summary_state_callback(
+        self, data: type_hints.BaseMsgType
+    ) -> None:
         """Callback to monitor summary state from atpneumatics.
 
         Parameters
@@ -2303,7 +2298,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.pneumatics_summary_state = State(data.summaryState)
 
-    def pneumatics_main_valve_state_callback(
+    async def pneumatics_main_valve_state_callback(
         self, data: type_hints.BaseMsgType
     ) -> None:
         """Callback to monitor main valve state from atpneumatics.
@@ -2315,7 +2310,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.pneumatics_main_valve_state = ATPneumatics.AirValveState(data.state)
 
-    def pneumatics_instrument_state_callback(
+    async def pneumatics_instrument_state_callback(
         self, data: type_hints.BaseMsgType
     ) -> None:
         """Callback to monitor instrument valve state from atpneumatics.
@@ -2327,7 +2322,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.pneumatics_instrument_valve_state = ATPneumatics.AirValveState(data.state)
 
-    def pneumatics_m1_state_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def pneumatics_m1_state_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback to monitor m1 valve state from atpneumatics.
 
         Parameters
@@ -2337,7 +2332,7 @@ class ATAOS(ConfigurableCsc):
         """
         self.pneumatics_m1_state = ATPneumatics.AirValveState(data.state)
 
-    def pneumatics_m2_state_callback(self, data: type_hints.BaseMsgType) -> None:
+    async def pneumatics_m2_state_callback(self, data: type_hints.BaseMsgType) -> None:
         """Callback to monitor m2 valve state from atpneumatics.
 
         Parameters
@@ -2348,7 +2343,6 @@ class ATAOS(ConfigurableCsc):
         self.pneumatics_m2_state = ATPneumatics.AirValveState(data.state)
 
     async def close(self) -> None:
-
         await self.atcs.close()
         await super().close()
         await self.camera.close()

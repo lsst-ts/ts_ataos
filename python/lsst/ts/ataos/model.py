@@ -17,7 +17,6 @@ class Model:
     """
 
     def __init__(self, log: typing.Optional[logging.Logger]):
-
         # Create a logger if none were passed during the instantiation of
         # the class
         if log is None:
@@ -398,7 +397,6 @@ class Model:
 
     @hexapod_sensitivity_matrix.setter
     def hexapod_sensitivity_matrix(self, val: np.ndarray) -> None:
-
         new_value = np.array(val, dtype=float)
 
         if new_value.shape != self._hexapod_sensitivity_matrix.shape:
