@@ -6,6 +6,13 @@
 Version History
 ###############
 
+v1.10.6
+-------
+
+Changes:
+
+  * Minor cosmetics updates; package configuration, conda recipe, isort.
+
 v1.10.5
 -------
 
