@@ -6,6 +6,14 @@
 Version History
 ###############
 
+v1.11.0
+-------
+
+Changes:
+
+  * Add M2 truss temperature to the Look-Up Table.
+  * Made Hexapod X, Y and Z LUT a 2D polynomial.
+
 v1.10.6
 -------
 
