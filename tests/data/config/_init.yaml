@@ -29,20 +29,29 @@ m2_lut_elevation_limits:
     - 90.0
 
 hexapod_x:
-  -          3.634
-  -         -4.934
-  -         -2.379
+  -         [3.634, 0.0, 0.0]
+  -         [-4.934, 0.0, 0.0]
+  -         [-2.379, 0.0, 0.0]
 
 hexapod_y:
-  -          2.249
+  -          [2.249, 0.0]
+  -          [0.0, 0.0]
 
 hexapod_z:
-  -         -0.217
-  -         -1.045
+  -         [-0.217, 0.0]
+  -         [-1.045, 0.0]
 
 hexapod_lut_elevation_limits:
   - 30.
   - 85.
+
+hexapod_lut_temperature_limits:
+  - 0.
+  - 18.
+
+fallback_temperature: 15.0
+max_temperature_telemetry_age: 300.
+temperature_item_index: 2
 
 hexapod_u:
   - 0.3500

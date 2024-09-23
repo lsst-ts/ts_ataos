@@ -112,19 +112,23 @@ class TestModel(unittest.TestCase):
             hexapod_sensitivity_matrix_propagete_axis, test_config, check_values
         )
 
-    def test_get_lut_elevation(self) -> None:
+    def test_get_lut_value_within_limits(self) -> None:
         limits = [20.0, 80.0]
 
         for inclination in [0.0, 5.0, 10.0, 15]:
-            self.assertEqual(self.model.get_lut_elevation(inclination, limits), 20.0)
+            self.assertEqual(
+                self.model.get_lut_value_within_limits(inclination, limits), 20.0
+            )
 
         for inclination in [20.0, 40.0, 60.0, 80.0]:
             self.assertEqual(
-                self.model.get_lut_elevation(inclination, limits), inclination
+                self.model.get_lut_value_within_limits(inclination, limits), inclination
             )
 
         for inclination in [82.5, 85.0, 87.5, 90.0]:
-            self.assertEqual(self.model.get_lut_elevation(inclination, limits), 80.0)
+            self.assertEqual(
+                self.model.get_lut_value_within_limits(inclination, limits), 80.0
+            )
 
     def test_set_hexapod_sensitivity_matrix_as_list(self) -> None:
         new_hexapod_sensitivity_matrix = [
