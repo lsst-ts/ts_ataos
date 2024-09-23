@@ -54,6 +54,7 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
 
         self._telescope_azimuth = 0.0
         self._telescope_elevation = 80.0
+        self._telescope_temperature = 15.0
 
         # provide spectrograph setup info
         self.filter_name = "test_filt1"
@@ -170,11 +171,16 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
 
             await self.remote.cmd_applyCorrection.start(timeout=STD_TIMEOUT)
 
-            await self.assert_apply_correction(
+            corrections_expected = dict(
                 while_exposing=True,
                 elevation=self._telescope_elevation,
                 azimuth=self._telescope_azimuth,
             )
+
+            if hasattr(self.remote.cmd_applyCorrection.DataType(), "temperature"):
+                corrections_expected["temperature"] = self._telescope_temperature
+
+            await self.assert_apply_correction(**corrections_expected)
 
     async def test_apply_correction(self) -> None:
         """Test applyCorrection command.
@@ -188,14 +194,20 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         ), self.mock_auxtel(), self.enable_csc():
             elevation = self._telescope_elevation
             azimuth = self._telescope_azimuth
+            temperature = self._telescope_temperature
 
             await self.remote.cmd_applyCorrection.start(timeout=STD_TIMEOUT)
 
-            await self.assert_apply_correction(
+            corrections_expected = dict(
                 while_exposing=False,
                 elevation=elevation,
                 azimuth=azimuth,
             )
+
+            if hasattr(self.remote.cmd_applyCorrection.DataType(), "temperature"):
+                corrections_expected["temperature"] = temperature
+
+            await self.assert_apply_correction(**corrections_expected)
 
     async def test_offset_fail_corrections_disabled(self) -> None:
         async with self.make_csc(
@@ -448,12 +460,12 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
 
         await self.remote.cmd_offset.set_start(**offset, timeout=STD_TIMEOUT)
 
-    async def assert_apply_correction(
-        self,
-        while_exposing: bool,
-        elevation: float,
-        azimuth: float,
-    ) -> None:
+    async def assert_apply_correction(self, **kwargs: typing.Any) -> None:
+        while_exposing = kwargs.get("while_exposing")
+        elevation = kwargs.get("elevation")
+        azimuth = kwargs.get("azimuth")
+        temperature = kwargs.get("temperature", None)
+
         self.pneumatics.cmd_m1SetPressure.callback.assert_awaited()
         self.pneumatics.cmd_m2SetPressure.callback.assert_awaited()
 
@@ -466,25 +478,26 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
 
         self.remote.evt_detailedState.callback.assert_awaited()
 
+        conditions_kwargs = {
+            "elevation": elevation,
+            "azimuth": azimuth,
+        }
+
+        # Add temperature to the kwargs if it was passed
+        if hasattr(self.remote.evt_m1CorrectionStarted.DataType(), "temperature"):
+            conditions_kwargs["temperature"] = temperature
+
         await self.assert_next_sample(
-            topic=self.remote.evt_m1CorrectionStarted,
-            elevation=elevation,
-            azimuth=azimuth,
+            topic=self.remote.evt_m1CorrectionStarted, **conditions_kwargs
         )
         await self.assert_next_sample(
-            topic=self.remote.evt_m2CorrectionStarted,
-            elevation=elevation,
-            azimuth=azimuth,
+            topic=self.remote.evt_m2CorrectionStarted, **conditions_kwargs
         )
         await self.assert_next_sample(
-            topic=self.remote.evt_m1CorrectionCompleted,
-            elevation=elevation,
-            azimuth=azimuth,
+            topic=self.remote.evt_m1CorrectionCompleted, **conditions_kwargs
         )
         await self.assert_next_sample(
-            topic=self.remote.evt_m2CorrectionCompleted,
-            elevation=elevation,
-            azimuth=azimuth,
+            topic=self.remote.evt_m2CorrectionCompleted, **conditions_kwargs
         )
 
         if while_exposing:
@@ -507,14 +520,10 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
 
         else:
             await self.assert_next_sample(
-                topic=self.remote.evt_hexapodCorrectionStarted,
-                elevation=elevation,
-                azimuth=azimuth,
+                topic=self.remote.evt_hexapodCorrectionStarted, **conditions_kwargs
             )
             await self.assert_next_sample(
-                topic=self.remote.evt_hexapodCorrectionCompleted,
-                elevation=elevation,
-                azimuth=azimuth,
+                topic=self.remote.evt_hexapodCorrectionCompleted, **conditions_kwargs
             )
             expected_atspectrograph_corrections = {
                 "focusOffset": pytest.approx(
@@ -696,10 +705,13 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
                 "ATCamera"
             ) as self.camera, salobj.Controller(
                 "ATSpectrograph"
-            ) as self.atspectrograph:
+            ) as self.atspectrograph, salobj.Controller(
+                "ESS"
+            ) as self.ess_remote:
                 self.set_pneumatics_callbacks()
                 self.set_atptg_callbacks()
                 self.set_athexapod_callbacks()
+                self.set_ess_temperature_callbacks()
 
                 await self.publish_pneumatics_initial_data()
                 await self.publish_atspectrograph_initial_data()
@@ -747,6 +759,11 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
     def set_athexapod_callbacks(self) -> None:
         self.hexapod.cmd_moveToPosition.callback = unittest.mock.AsyncMock(
             wraps=self.hexapod_move_callback
+        )
+
+    def set_ess_temperature_callbacks(self) -> None:
+        self.ess_remote.tel_temperature.callback = unittest.mock.AsyncMock(
+            wraps=self.handle_temperature_callback
         )
 
     async def publish_pneumatics_initial_data(self) -> None:
@@ -804,6 +821,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
             positionU=data.u,
             positionV=data.v,
         )
+
+    async def handle_temperature_callback(self, data: typing.Any) -> None:
+        self._telescope_temperature = data.temperature
 
     async def m1_set_pressure_callback(self, data: typing.Any) -> None:
         await self.pneumatics.tel_m1AirPressure.set_write(pressure=data.pressure)

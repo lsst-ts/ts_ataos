@@ -2,6 +2,7 @@ import logging
 import typing
 
 import numpy as np
+from numpy.polynomial.polynomial import polyval2d
 
 __all__ = ["Model"]
 
@@ -27,9 +28,9 @@ class Model:
         self.config = {
             "m1": [0.0],
             "m2": [0.0],
-            "hexapod_x": [0.0],
-            "hexapod_y": [0.0],
-            "hexapod_z": [0.0],
+            "hexapod_x": np.zeros((3, 3)),
+            "hexapod_y": np.zeros((3, 3)),
+            "hexapod_z": np.zeros((3, 3)),
             "hexapod_u": [0.0],
             "hexapod_v": [0.0],
             "chromatic_dependence": [0.0],
@@ -62,9 +63,9 @@ class Model:
 
         self.poly_m1 = np.poly1d(self.config["m1"])
         self.poly_m2 = np.poly1d(self.config["m2"])
-        self.poly_x = np.poly1d(self.config["hexapod_x"])
-        self.poly_y = np.poly1d(self.config["hexapod_y"])
-        self.poly_z = np.poly1d(self.config["hexapod_z"])
+        self.poly_x_coefs = self.config["hexapod_x"]
+        self.poly_y_coefs = self.config["hexapod_y"]
+        self.poly_z_coefs = self.config["hexapod_z"]
         self.poly_u = np.poly1d(self.config["hexapod_u"])
         self.poly_v = np.poly1d(self.config["hexapod_v"])
         self.poly_chromatic = np.poly1d(self.config["chromatic_dependence"])
@@ -72,6 +73,7 @@ class Model:
         self.m1_lut_elevation_limits = [0.0, 90.0]
         self.m2_lut_elevation_limits = [0.0, 90.0]
         self.hexapod_lut_elevation_limits = [0.0, 90.0]
+        self.hexapod_lut_temperature_limits = [0.0, 20.0]
 
         self.m1_pressure_minimum = 0.0
 
@@ -150,7 +152,7 @@ class Model:
                 np.cos(
                     np.radians(
                         90.0
-                        - self.get_lut_elevation(
+                        - self.get_lut_value_within_limits(
                             elevation, self.m1_lut_elevation_limits
                         )
                     )
@@ -198,7 +200,7 @@ class Model:
                 np.cos(
                     np.radians(
                         90.0
-                        - self.get_lut_elevation(
+                        - self.get_lut_value_within_limits(
                             elevation, self.m2_lut_elevation_limits
                         )
                     )
@@ -211,7 +213,7 @@ class Model:
         self,
         azimuth: float,
         elevation: float,
-        temperature: typing.Optional[float] = None,
+        temperature: float,
     ) -> np.ndarray:
         """Correction for hexapod position.
 
@@ -241,17 +243,33 @@ class Model:
                 w : float
                     [DISABLED] rotation angle with respect to z-axis (degrees)
         """
-        lut_elevation = self.get_lut_elevation(
+        lut_elevation = self.get_lut_value_within_limits(
             elevation, self.hexapod_lut_elevation_limits
+        )
+
+        lut_temperature = self.get_lut_value_within_limits(
+            temperature, self.hexapod_lut_temperature_limits
         )
 
         _offset = np.array(
             [
-                self.poly_x(np.cos(np.radians(90.0 - lut_elevation)))
+                polyval2d(
+                    np.cos(np.radians(90.0 - lut_elevation)),
+                    lut_temperature,
+                    self.poly_x_coefs,
+                )
                 + self.offset["x"],
-                self.poly_y(np.cos(np.radians(90.0 - lut_elevation)))
+                polyval2d(
+                    np.cos(np.radians(90.0 - lut_elevation)),
+                    lut_temperature,
+                    self.poly_y_coefs,
+                )
                 + self.offset["y"],
-                self.poly_z(np.cos(np.radians(90.0 - lut_elevation)))
+                polyval2d(
+                    np.cos(np.radians(90.0 - lut_elevation)),
+                    lut_temperature,
+                    self.poly_z_coefs,
+                )
                 + self.offset["z"],
                 self.poly_u(np.cos(np.radians(90.0 - lut_elevation)))
                 + self.offset["u"],
@@ -338,31 +356,31 @@ class Model:
         self.poly_m2 = np.poly1d(val)
 
     @property
-    def hexapod_x(self) -> typing.List[float]:
+    def hexapod_x(self) -> np.ndarray[float]:
         return self.config["hexapod_x"]
 
     @hexapod_x.setter
-    def hexapod_x(self, val: typing.List[float]) -> None:
-        self.config["hexapod_x"] = val
-        self.poly_x = np.poly1d(val)
+    def hexapod_x(self, coefs: np.ndarray[float]) -> None:
+        self.config["hexapod_x"] = coefs
+        self.poly_x_coefs = coefs
 
     @property
-    def hexapod_y(self) -> typing.List[float]:
+    def hexapod_y(self) -> np.ndarray[float]:
         return self.config["hexapod_y"]
 
     @hexapod_y.setter
-    def hexapod_y(self, val: typing.List[float]) -> None:
-        self.config["hexapod_y"] = val
-        self.poly_y = np.poly1d(val)
+    def hexapod_y(self, coefs: np.ndarray[float]) -> None:
+        self.config["hexapod_y"] = coefs
+        self.poly_y_coefs = coefs
 
     @property
-    def hexapod_z(self) -> typing.List[float]:
+    def hexapod_z(self) -> np.ndarray[float]:
         return self.config["hexapod_z"]
 
     @hexapod_z.setter
-    def hexapod_z(self, val: typing.List[float]) -> None:
-        self.config["hexapod_z"] = val
-        self.poly_z = np.poly1d(val)
+    def hexapod_z(self, coefs: np.ndarray[float]) -> None:
+        self.config["hexapod_z"] = coefs
+        self.poly_z_coefs = coefs
 
     @property
     def hexapod_u(self) -> typing.List[float]:
@@ -408,23 +426,23 @@ class Model:
         self._hexapod_sensitivity_matrix = new_value.copy()
 
     @staticmethod
-    def get_lut_elevation(elevation: float, limits: typing.List[float]) -> float:
-        """Return an elevation value inside the limits.
+    def get_lut_value_within_limits(value: float, limits: typing.List[float]) -> float:
+        """Return a variable value inside the limits.
 
         Parameters
         ----------
-        elevation: `float`
-            Elevation for the correction.
+        value: `float`
+            Variable value for the correction.
         limits: `list` [`float`, `float`]
             List with the minimum and maximum limits.
 
         Returns
         -------
         `float`
-            Elevation in the closed range (limits[0], limits[1]).
+            Variable in the closed range (limits[0], limits[1]).
         """
         return (
-            elevation
-            if limits[0] <= elevation <= limits[1]
-            else (limits[0] if elevation < limits[0] else limits[1])
+            value
+            if limits[0] <= value <= limits[1]
+            else (limits[0] if value < limits[0] else limits[1])
         )
