@@ -271,7 +271,7 @@ class ATAOS(ConfigurableCsc):
         if self._temperature_data is not None:
             if (
                 utils.current_tai() - self._temperature_data.private_sndStamp
-                > self.max_telemetry_age
+                > self.max_temperature_telemetry_age
             ):
                 self.log.warning(
                     "Temperature telemetry too old, using fallback temperature."
