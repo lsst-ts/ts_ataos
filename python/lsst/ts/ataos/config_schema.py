@@ -26,7 +26,7 @@ CONFIG_SCHEMA = yaml.safe_load(
     """$schema: http://json-schema.org/draft-07/schema#
 $id: https://github.com/lsst-ts/ts_ataos/blob/main/python/lsst/ts/ataos/config_schema.py
 # title must end with one or more spaces followed by the schema version, which must begin with "v"
-title: ATAOS v4
+title: ATAOS v5
 description: Schema for ATAOS configuration files
 type: object
 properties:
@@ -66,11 +66,6 @@ properties:
         type: number
         minItems: 2
         maxItems: 2
-  hexapod_x:
-    description: List of polynomial coefficients for hexapod x-correction equation.
-    type: array
-    items:
-      type: number
   hexapod_lut_elevation_limits:
     description: >-
         Elevation limits for the validity of the hexapod position LUT. Any
@@ -81,16 +76,56 @@ properties:
         type: number
         minItems: 2
         maxItems: 2
+  hexapod_lut_temperature_limits:
+    description: >-
+        Temperature limits in C for the validity of the hexapod position LUT.
+        Any values outside this range will be assigned the value at
+        these temperatures. This range apply equally for all axis.
+    type: array
+    items:
+        type: number
+        minItems: 2
+        maxItems: 2
+  fallback_temperature:
+    description: >-
+        Temperature in C to use if the telemetry is too old to be used.
+    type: number
+  max_temperature_telemetry_age:
+    description: >-
+        Maximum age in seconds for the telemetry to be considered valid.
+    type: number
+  temperature_item_index:
+    description: >-
+        Index of the telemetry item to use for temperature correction.
+    type: integer
+    default: 2
+  hexapod_x:
+    description: Array of 2D polynomial coefficients for hexapod x-correction equation.
+    type: array
+    items:
+      type: array
+      description: Polynomial coefficients for a specific power of cos(elevation).
+      items:
+        type: number
+        description: Coefficients for the corresponding power of temperature.
   hexapod_y:
-    description: List of polynomial coefficients for hexapod y-correction equation.
+    description: Array of 2D polynomial coefficients for hexapod y-correction equation.
     type: array
     items:
-      type: number
+      type: array
+      description: Polynomial coefficients for a specific power of cos(elevation).
+      items:
+        type: number
+        description: Coefficients for the corresponding power of temperature.
   hexapod_z:
-    description: List of polynomial coefficients for hexapod z-correction equation (focus).
+    description: Array of 2D polynomial coefficients for hexapod z-correction equation (focus).
     type: array
     items:
-      type: number
+      type: array
+      description: Polynomial coefficients for a specific power of cos(elevation).
+      items:
+        type: number
+        description: Coefficients for the corresponding power of temperature.
   hexapod_u:
     description: List of polynomial coefficients for hexapod u-correction equation.
     type: array
@@ -174,6 +209,9 @@ required:
 - hexapod_u
 - hexapod_v
 - hexapod_lut_elevation_limits
+- hexapod_lut_temperature_limits
+- fallback_temperature
+- max_temperature_telemetry_age
 - correction_tolerance
 - chromatic_dependence
 - hexapod_sensitivity_matrix

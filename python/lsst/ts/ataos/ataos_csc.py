@@ -152,6 +152,25 @@ class ATAOS(ConfigurableCsc):
         # Add required callbacks for ATCamera
         self.camera.evt_shutterDetailedState.callback = self.shutter_monitor_callback
 
+        # Create a remote for the ESS temperature
+        self.ess_remote = Remote(
+            self.domain,
+            "ESS",
+            index=201,
+            include=[
+                "temperature",
+            ],
+        )
+
+        # Add required callbacks for ESS
+        self.ess_remote.tel_temperature.callback = self.handle_temperature_callback
+        self._temperature_data = None
+
+        # Default temperature and max telemetry age
+        self.fallback_temperature = 15.0
+        self.max_temperature_telemetry_age = 5 * self.heartbeat_interval
+        self.temperature_item_index = 2
+
         # Corrections
         self.valid_corrections = (
             "enableAll",
@@ -220,7 +239,7 @@ class ATAOS(ConfigurableCsc):
         # grating has changed.
 
         self.corrections_routines: typing.Dict[
-            str, typing.Callable[[float, float], typing.Awaitable[None]]
+            str, typing.Callable[[float, float, float], typing.Awaitable[None]]
         ] = {
             "m1": self.set_pressure_m1,
             "m2": self.set_pressure_m2,
@@ -246,6 +265,36 @@ class ATAOS(ConfigurableCsc):
     @property
     def hexapod(self) -> Remote:
         return self.atcs.rem.athexapod
+
+    @property
+    def temperature(self) -> float:
+        if self._temperature_data is not None:
+            if (
+                utils.current_tai() - self._temperature_data.private_sndStamp
+                > self.max_telemetry_age
+            ):
+                self.log.warning(
+                    "Temperature telemetry too old, using fallback temperature."
+                )
+                return self.fallback_temperature
+            else:
+                # Return Truss temperature which is the second item.
+                return self._temperature_data.temperatureItem[
+                    self.temperature_item_index
+                ]
+        else:
+            return self.fallback_temperature
+
+    async def handle_temperature_callback(self, data: type_hints.BaseMsgType) -> None:
+        """Handle ESS temperature telemetry.
+
+        Parameters
+        ----------
+        data : `salobj.BaseMsgType`
+            ESS telemetry data
+        """
+        if data.sensorName == "AuxTel-ESS01":
+            self._temperature_data = data
 
     # create properties for azimuth/elevation aspects so that callbacks are
     # not required. These callbacks cause issues inside the ATCS class
@@ -643,31 +692,50 @@ class ATAOS(ConfigurableCsc):
 
         azimuth = data.azimuth % 360.0
         elevation = data.elevation
+        # Check if data has temperature attribute
+        temperature = (
+            data.temperature
+            if hasattr(data, "temperature")
+            else self.fallback_temperature
+        )
 
         if elevation == 0.0:
-            if self.azimuth is None or self.elevation is None:
+            if (
+                self.azimuth is None
+                or self.elevation is None
+                or self.temperature is None
+            ):
                 raise RuntimeError(
-                    "No information about telescope azimuth and/or "
+                    "No information about telescope azimuth, temperature and/or "
                     "elevation available."
                 )
             # Get telescope position stored by callback function.
             azimuth = self.azimuth
             elevation = self.elevation
+            temperature = self.temperature
 
         self.log.debug("Apply correction to Hexapod")
-        await self.set_hexapod(azimuth, elevation)
+        await self.set_hexapod(azimuth, elevation, temperature)
 
         self.log.debug("Apply correction to M1")
         await self.set_pressure(
-            "m1", azimuth, elevation, self.model.get_correction_m1(azimuth, elevation)
+            "m1",
+            azimuth,
+            elevation,
+            temperature,
+            self.model.get_correction_m1(azimuth, elevation, temperature),
         )
         self.log.debug("Apply correction to M2")
         await self.set_pressure(
-            "m2", azimuth, elevation, self.model.get_correction_m2(azimuth, elevation)
+            "m2",
+            azimuth,
+            elevation,
+            temperature,
+            self.model.get_correction_m2(azimuth, elevation, temperature),
         )
 
         self.log.debug("Apply corrections from spectrograph")
-        await self.set_atspectrograph_corrections(azimuth, elevation)
+        await self.set_atspectrograph_corrections(azimuth, elevation, temperature)
 
     async def do_applyFocusOffset(self, data: type_hints.BaseMsgType) -> None:
         """Applies a relative focus offset to the hexapod position
@@ -1262,9 +1330,14 @@ class ATAOS(ConfigurableCsc):
             async with self.correction_loop_lock:
                 try:
                     corrections_to_apply = []
-                    if self.azimuth is not None and self.elevation is not None:
+                    if (
+                        self.azimuth is not None
+                        and self.temperature is not None
+                        and self.elevation is not None
+                    ):
                         elevation = self.elevation
                         azimuth = self.azimuth
+                        temperature = self.temperature
 
                         if (
                             self.target_elevation is not None
@@ -1289,7 +1362,7 @@ class ATAOS(ConfigurableCsc):
                                 self.log.debug(f"Adding {correction} correction.")
                                 corrections_to_apply.append(
                                     self.corrections_routines[correction](
-                                        azimuth, elevation
+                                        azimuth, elevation, temperature
                                     )
                                 )
 
@@ -1656,39 +1729,47 @@ class ATAOS(ConfigurableCsc):
         """
         self.current_positions["m2"] = data.pressure
 
-    async def set_pressure_m1(self, azimuth: float, elevation: float) -> None:
+    async def set_pressure_m1(
+        self, azimuth: float, elevation: float, temperature: float
+    ) -> None:
         """Set pressure on m1.
 
         Parameters
         ----------
         azimuth : float
         elevation : float
+        temperature : float
         """
-        pressure = self.model.get_correction_m1(azimuth, elevation)
+        pressure = self.model.get_correction_m1(azimuth, elevation, temperature)
 
         await self.set_pressure(
             "m1",
             azimuth,
             elevation,
+            temperature,
             pressure,
             self.current_positions["m1"],
             self.correction_tolerance["m1"],
         )
 
-    async def set_pressure_m2(self, azimuth: float, elevation: float) -> None:
+    async def set_pressure_m2(
+        self, azimuth: float, elevation: float, temperature: float
+    ) -> None:
         """Set pressure on m2.
 
         Parameters
         ----------
         azimuth : float
         elevation : float
+        temperature : float
         """
-        pressure = self.model.get_correction_m2(azimuth, elevation)
+        pressure = self.model.get_correction_m2(azimuth, elevation, temperature)
 
         await self.set_pressure(
             "m2",
             azimuth,
             elevation,
+            temperature,
             pressure,
             self.current_positions["m2"],
             self.correction_tolerance["m2"],
@@ -1699,6 +1780,7 @@ class ATAOS(ConfigurableCsc):
         mirror: str,
         azimuth: float,
         elevation: float,
+        temperature: float,
         pressure: float,
         current: typing.Optional[float] = None,
         tolerance: typing.Optional[float] = None,
@@ -1749,9 +1831,17 @@ class ATAOS(ConfigurableCsc):
             evt_start_attr = getattr(self, f"evt_{mirror}CorrectionStarted")
             evt_end_attr = getattr(self, f"evt_{mirror}CorrectionCompleted")
 
-            await evt_start_attr.set_write(
-                azimuth=azimuth, elevation=elevation, pressure=pressure
+            event_data = dict(
+                azimuth=azimuth,
+                elevation=elevation,
+                pressure=pressure,
             )
+
+            if hasattr(evt_start_attr.DataType(), "temperature"):
+                event_data["temperature"] = temperature
+
+            await evt_start_attr.set_write(**event_data)
+
             try:
                 await cmd_attr.set_start(pressure=pressure, timeout=self.cmd_timeout)
             except Exception as e:
@@ -1761,14 +1851,13 @@ class ATAOS(ConfigurableCsc):
                 )
                 raise e
             finally:
-                await evt_end_attr.set_write(
-                    azimuth=azimuth, elevation=elevation, pressure=pressure
-                )
+                await evt_end_attr.set_write(**event_data)
+
                 # correction completed... flip bit on detailedState
                 await self.set_detailed_state(self.detailed_state ^ status_bit)
 
     async def set_hexapod(
-        self, azimuth: float, elevation: float, axis: str = "xyzuvw"
+        self, azimuth: float, elevation: float, temperature: float, axis: str = "xyzuvw"
     ) -> None:
         """Utility to calculate desired hexapod position based on models,
          then apply the movements.
@@ -1779,6 +1868,8 @@ class ATAOS(ConfigurableCsc):
             Azimuth (deg)
         elevation : float
             Elevation (deg)
+        temperature : float
+            Temperature (C)
         axis : string
             Which axis to set position. Any subset of the string "xyzuvw".
         """
@@ -1803,12 +1894,15 @@ class ATAOS(ConfigurableCsc):
             hexapod = dict(
                 zip(
                     [f"hexapod_{ax}" for ax in "xyzuvw"],
-                    self.model.get_correction_hexapod(azimuth, elevation),
+                    self.model.get_correction_hexapod(azimuth, elevation, temperature),
                 )
             )
 
             hexapod_mov = dict(
-                zip("xyzuvw", self.model.get_correction_hexapod(azimuth, elevation))
+                zip(
+                    "xyzuvw",
+                    self.model.get_correction_hexapod(azimuth, elevation, temperature),
+                )
             )
 
             apply_correction = False
@@ -1847,9 +1941,13 @@ class ATAOS(ConfigurableCsc):
                 )
                 return
 
-            evt_start_attr.set(elevation=elevation, azimuth=azimuth, **hexapod)
+            event_data = dict(azimuth=azimuth, elevation=elevation, **hexapod)
 
-            evt_end_attr.set(elevation=elevation, azimuth=azimuth, **hexapod)
+            if hasattr(evt_start_attr.DataType(), "temperature"):
+                event_data["temperature"] = temperature
+
+            evt_start_attr.set(**event_data)
+            evt_end_attr.set(**event_data)
 
             await evt_start_attr.write()
 
@@ -1872,7 +1970,10 @@ class ATAOS(ConfigurableCsc):
                 )
 
     async def set_atspectrograph_corrections(
-        self, azimuth: float, elevation: float
+        self,
+        azimuth: float,
+        elevation: float,
+        temperature: float,
     ) -> None:
         """Utility to apply hexapod and/or pointing corrections based on
          the ATSpectrograph configuration. This gets called as part of
@@ -1884,6 +1985,8 @@ class ATAOS(ConfigurableCsc):
             Azimuth (deg)
         elevation : float
             Elevation (deg)
+        temperature : float
+            Temperature (C)
 
         Warning
         -------
@@ -2020,7 +2123,7 @@ class ATAOS(ConfigurableCsc):
                 self.log.debug(
                     f"Applying focus correction {_offset_value}" " with hexapod"
                 )
-                await self.set_hexapod(azimuth, elevation)
+                await self.set_hexapod(azimuth, elevation, temperature)
 
             # Apply pointing correction if above tolerance
             # note that the comparison to zero should not be an issue as
@@ -2108,6 +2211,11 @@ class ATAOS(ConfigurableCsc):
         self.correction_loop_time = 1.0 / config.correction_frequency
         self.log.debug(f"Correction loop time is {self.correction_loop_time}")
 
+        self.fallback_temperature = config.fallback_temperature
+        self.max_temperature_telemetry_age = config.max_temperature_telemetry_age
+
+        self.temperature_item_index = config.temperature_item_index
+
         for key in [
             "m1",
             "m2",
@@ -2121,7 +2229,10 @@ class ATAOS(ConfigurableCsc):
             if hasattr(config, key):
                 setattr(self.model, key, getattr(config, key))
             else:
-                setattr(self.model, key, [0.0])
+                if key in ["hexapod_x", "hexapod_y", "hexapod_z"]:
+                    setattr(self.model, key, np.zeros(3, 3))
+                else:
+                    setattr(self.model, key, [0.0])
 
         if hasattr(config, "correction_tolerance"):
             for key in config.correction_tolerance:
@@ -2135,6 +2246,9 @@ class ATAOS(ConfigurableCsc):
         self.model.m1_pressure_minimum = config.m1_pressure_minimum
         self.model.m2_lut_elevation_limits = config.m2_lut_elevation_limits
         self.model.hexapod_lut_elevation_limits = config.hexapod_lut_elevation_limits
+        self.model.hexapod_lut_temperature_limits = (
+            config.hexapod_lut_temperature_limits
+        )
 
     async def atspectrograph_summary_state_callback(
         self, data: type_hints.BaseMsgType
