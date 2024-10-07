@@ -6,6 +6,10 @@
 Version History
 ###############
 
+v1.11.1
+-------
+  * Fix bug in temperature property
+
 v1.11.0
 -------
 
