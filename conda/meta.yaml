@@ -19,7 +19,7 @@ test:
     - ts-conda-build =0.4
     - astroquery
     - ts-dds
-    - ts-idl {{ idl_version }}
+    - ts-xml {{ xml_version }}
     - ts-salobj {{ salobj_version }}
     - ts-observatory-control
   source_files:
@@ -47,5 +47,5 @@ requirements:
     - setuptools_scm
     - astroquery
     - ts-salobj
-    - ts-idl
+    - ts-xml
     - ts-observatory-control
