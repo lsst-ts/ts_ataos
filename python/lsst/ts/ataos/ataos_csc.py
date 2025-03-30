@@ -6,10 +6,10 @@ import typing
 
 import numpy as np
 from lsst.ts import utils
-from lsst.ts.idl.enums import ATPneumatics
 from lsst.ts.observatory.control.auxtel import ATCS, ATCSUsages
 from lsst.ts.salobj import AckError, ConfigurableCsc, Remote, SalRetCode, State
 from lsst.ts.xml import type_hints
+from lsst.ts.xml.enums import ATPneumatics
 
 from . import __version__
 from .config_schema import CONFIG_SCHEMA
