@@ -6,6 +6,13 @@
 Version History
 ###############
 
+v1.11.2
+-------
+
+Changes:
+
+  * Fix the uncleared topics in Kafka broker.
+
 v1.11.1
 -------
   * Fix bug in temperature property

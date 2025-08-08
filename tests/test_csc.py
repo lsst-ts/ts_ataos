@@ -101,7 +101,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         * standby: DISABLED to STANDBY
         * exitControl: STANDBY, FAULT to OFFLINE (quit)
         """
-        async with self.make_csc(initial_state=salobj.State.STANDBY):
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel():
             await self.check_standard_state_transitions(
                 enabled_commands=(
                     "applyCorrection",
