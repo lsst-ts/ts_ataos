@@ -12,6 +12,7 @@ v1.11.2
 Changes:
 
   * Fix the uncleared topics in Kafka broker.
+  * Fix version handling for conda packaging.
 
 v1.11.1
 -------
