@@ -29,7 +29,7 @@ import unittest.mock
 import numpy as np
 import pytest
 from lsst.ts import ataos, salobj
-from lsst.ts.idl.enums import ATPneumatics
+from lsst.ts.xml.enums import ATPneumatics
 
 STD_TIMEOUT = 5  # standard command timeout (sec)
 LONG_TIMEOUT = 20  # timeout for starting SAL components (sec)
@@ -101,7 +101,9 @@ class TestCSC(salobj.BaseCscTestCase, unittest.IsolatedAsyncioTestCase):
         * standby: DISABLED to STANDBY
         * exitControl: STANDBY, FAULT to OFFLINE (quit)
         """
-        async with self.make_csc(initial_state=salobj.State.STANDBY):
+        async with self.make_csc(
+            initial_state=salobj.State.STANDBY
+        ), self.mock_auxtel():
             await self.check_standard_state_transitions(
                 enabled_commands=(
                     "applyCorrection",
