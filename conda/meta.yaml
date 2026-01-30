@@ -11,12 +11,11 @@ build:
   script: {{ PYTHON }} -m pip install --no-deps --ignore-installed .
   entry_points:
     - run_ataos_csc = lsst.ts.ataos.ataos_csc:run_ataos_csc
-  script_env:
-    - TS_CONFIG_ATTCS_DIR
+  string: "py{{ PY_VER | replace('.', '') }}{{ PKG_HASH }}_{{ PKG_BUILDNUM }}"
 
 test:
   requires:
-    - ts-conda-build =0.4
+    - ts-conda-build =0.5
     - astroquery
     - ts-xml {{ xml_version }}
     - ts-salobj {{ salobj_version }}
@@ -33,13 +32,8 @@ requirements:
   host:
     - python {{ python }}
     - pip
-    - setuptools_scm
-    - setuptools
-  build:
-    - python {{ python }}
-    - setuptools_scm
-    - setuptools
-    - ts-conda-build =0.4
+    - setuptools_scm ={{setuptools_scm}}
+    - setuptools >={{setuptools}}
   run:
     - python {{ python }}
     - setuptools
